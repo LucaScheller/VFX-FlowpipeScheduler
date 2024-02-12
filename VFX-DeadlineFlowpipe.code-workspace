@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+	],
+	"settings": {
+		"git.autofetch": true,
+		"git.autofetchPeriod": 3600,
+		"python.autoComplete.extraPaths": [
+			"../../../../opt/hfs19.5/python/lib/python3.9/site-packages",
+			"ext/flowpipe"
+		],
+		"python.analysis.extraPaths": [
+			"../../../../opt/hfs19.5/python/lib/python3.9/site-packages",
+			"ext/flowpipe"
+		]
+	}
+}

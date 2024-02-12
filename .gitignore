@@ -1,0 +1,7 @@
+*.pyc
+dependencies
+files
+reference
+trash
+backup
+ext/python
