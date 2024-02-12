@@ -1,0 +1,3 @@
+[submodule "ext/flowpipe"]
+	path = ext/flowpipe
+	url = https://github.com/LucaScheller/flowpipe.git
