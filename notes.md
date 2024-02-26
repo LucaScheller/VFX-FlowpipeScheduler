@@ -12,3 +12,28 @@ Manually edit shell line prefix to "VFX-DeadlineFlowpipe-Python" in:
 ### Pip Installs
 > source $REPO_ROOT/ext/python/bin/activate
 > pip install ascii_canvas
+> pip install /opt/Thinkbox/DeadlineRepository10/api/scripting/deadline-stubs-10.3.1.4.tar.gz
+
+# Repo Source
+## Dev Env
+source setup.sh
+## Start
+redis-server
+deadline-start
+deadline-webservice
+### Inspection
+redis-insight
+### Workers
+$DEADLINE_INSTALL_ROOT/DeadlineClient10/bin/deadlineworker
+$DEADLINE_INSTALL_ROOT/DeadlineClient10/bin/deadlineworker -name "background"
+## Stop
+deadline-stop
+redis-cli shutdown
+
+
+# ToDos
+- Add deadline minimal support
+- Add Reddis Backend
+- Add Multi-Interpreters
+- Add deadline scripts support
+- Add deadline custom dependency supprt

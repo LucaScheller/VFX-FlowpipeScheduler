@@ -1,0 +1,26 @@
+{
+	"folders": [
+		{
+			"path": ".",
+		},
+		{
+			"path": "/mnt/data/PROJECT/VFX-DeadlineRepository",
+		},
+	],
+	"settings": {
+		"git.autofetch": true,
+		"git.autofetchPeriod": 3600,
+		"python.autoComplete.extraPaths": [
+			"/mnt/data/PROJECT/VFX-DeadlineRepository/library/python",
+			"/opt/Thinkbox/DeadlineRepository10/api/python",
+			"ext/python/lib/python3.12/site-packages",
+			"/opt/hfs19.5/python/lib/python3.9/site-packages",
+		],
+		"python.analysis.extraPaths": [
+			"/mnt/data/PROJECT/VFX-DeadlineRepository/library/python",
+			"/opt/Thinkbox/DeadlineRepository10/api/python",
+			"ext/python/lib/python3.12/site-packages",
+			"/opt/hfs19.5/python/lib/python3.9/site-packages",
+		]
+	}
+}
