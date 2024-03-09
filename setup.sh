@@ -3,7 +3,7 @@ if [ ! $REPO_SOURCED ]
 then
     # Define repo root
     export REPO_SOURCED=1
-    export REPO_ROOT=$PROJECT/VFX-FlowpipeDeadline
+    export REPO_ROOT=$PROJECT/VFX-FlowpipeScheduler
     # Source Python
     source $REPO_ROOT/ext/python/bin/activate
     export PYTHONDONTWRITEBYTECODE=1 # Disable __pycache__ byte code generation

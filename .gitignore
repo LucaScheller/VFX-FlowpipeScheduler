@@ -1,4 +1,6 @@
 *.pyc
+*.rdb
+__pycache__/
 dependencies
 files
 reference

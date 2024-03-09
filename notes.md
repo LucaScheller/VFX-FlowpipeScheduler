@@ -36,4 +36,4 @@ redis-cli shutdown
 - Add Reddis Backend
 - Add Multi-Interpreters
 - Add deadline scripts support
-- Add deadline custom dependency supprt
+- Add deadline custom dependency support/task grouping for node interpreters/task dependency instead of job dependency
