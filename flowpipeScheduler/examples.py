@@ -4,7 +4,6 @@ import os
 import sys
 from tempfile import gettempdir
 
-import redis
 from flowpipe import Graph, INode, Node
 
 

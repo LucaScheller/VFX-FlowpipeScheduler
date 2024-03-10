@@ -8,6 +8,9 @@
 		},
 	],
 	"settings": {
+		"files.exclude": {
+			"*.rdb": true
+		},
 		"git.autofetch": true,
 		"git.autofetchPeriod": 3600,
 		"python.autoComplete.extraPaths": [
