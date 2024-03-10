@@ -32,8 +32,6 @@ redis-cli shutdown
 
 
 # ToDos
-- Add deadline minimal support
-- Add Reddis Backend
 - Add Multi-Interpreters
 - Add deadline scripts support
 - Add deadline custom dependency support/task grouping for node interpreters/task dependency instead of job dependency

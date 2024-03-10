@@ -19,8 +19,6 @@ from deadlineAPI.Deadline import Jobs as DLJobs
 class EnvironmentVariables:
     identifier = "FP_IDENTIFIER"
     database_type = "FP_DATABASE_TYPE"
-    batch_range = "FP_BATCH_RANGE"
-
 
 # -----------------------------------------------------------------------------
 #
@@ -133,7 +131,7 @@ def get_database(database_type):
 
 # Command templates for different interpreters
 COMMAND_INTERPRETER = {
-    "python": "/mnt/data/PROJECT/VFX-FlowpipeScheduler/ext/python/bin/python",
+    "python": os.path.join(os.environ["PROJECT"], "VFX-FlowpipeScheduler/ext/python/bin/python"),
     "python_39": "python3.9",
     "python_311": "python3.11",
     "python_312": "python3.12",
@@ -148,10 +146,12 @@ COMMAND_INTERPRETER = {
 # -----------------------------------------------------------------------------
 
 
-def evaluate_on_farm_through_env():
-    """Evaluate on farm by extracting the evaluation data through environment variables."""
+def evaluate_on_farm_through_env(batch_range=None):
+    """Evaluate on farm by extracting the evaluation data through environment variables.
+    Args:
+        batch_range [tuple(int, int, int)| None]: The batch range.
+    """
     identifier = os.environ[EnvironmentVariables.identifier]
-    batch_range = os.environ[EnvironmentVariables.batch_range]
     database_type = os.environ[EnvironmentVariables.database_type]
     evaluate_on_farm(identifier, batch_range, database_type)
 
@@ -173,12 +173,13 @@ def evaluate_on_farm(
         not be the 'last' batch actually executed.
     """
 
+    # Database
     database = get_database(database_type)
 
+    # Node
     node_identifier = identifier
     node_data = database.get(node_identifier)
     node = INode.deserialize(node_data)
-
     # Retrieve the upstream output data
     # We have to use the raw json data dict for looking up the connections
     # as a deserialize would need the graph context.
@@ -205,14 +206,22 @@ def evaluate_on_farm(
                     node.inputs[name][sub_input_plug_idx].value = upstream_node.outputs[
                         output_plug
                     ].value
-    # Specifically assign the batch frames here if applicable
-    """
-    if batch_range is not None:
-        all_batch_items = node.inputs["batch_items"]
-        node.inputs["batch_items"] = all_batch_items[
-            batch_range[0] : batch_range[1] + 1 : batch_range[2]
-        ]
-    """
+
+    # Batch range
+    batch_enable = False
+    batch_items_plug = node.inputs.get("batch_items", None)
+    batch_frame_offset = node.metadata.get("batch_frame_offset", 0)
+    if batch_range is not None and batch_items_plug is not None:
+        if batch_items_plug.value:
+            batch_enable = True
+            if batch_frame_offset != 0:
+                batch_range = list(batch_range) # tuple to list
+                batch_range[0] -= batch_frame_offset
+                batch_range[1] -= batch_frame_offset
+            all_batch_items = node.inputs["batch_items"].value
+            node.inputs["batch_items"].value = all_batch_items[
+                batch_range[0] : batch_range[1] + 1 : batch_range[2]
+            ]
 
     # Evaluate node
     node.evaluate()
@@ -221,10 +230,10 @@ def evaluate_on_farm(
     # ALL batch processes access the same json file so the result is only stored
     # for the last batch, knowing that the last batch in numbers might not be
     # the last batch actually executed
-    """
-    if batch_range is not None and batch_range[1] + 1 != len(all_batch_items):
-        return
-    """
+    if batch_enable:
+        if batch_range[1] + 1 != len(all_batch_items):
+            return
+
     database.set(node)
 
 
@@ -278,10 +287,17 @@ def dl_job_script_evaluate_on_farm_through_env(script_type: str):
     evaluate_on_farm(identifier, batch_range, database_type)
 
 
-def dl_convert_graph_to_job(
+def dl_send_graph_to_farm(
     connection, graph: Graph, database_type=DatabaseType.RedisDatabase
 ):
-    """Convert the graph to a dict representing a typical render farm job."""
+    """Convert the graph to a dict representing a typical render farm job.
+    Args:
+        connection (DeadlineWebService.DeadlineConnect.DeadlineCon): The deadline webservice connection.
+        graph (Graph): The graph.
+        database_type (DatabaseType): The database type.
+    Returns:
+        list[DLJobs.Jobs]: A list of job objects.
+    """
 
     # Database
     database = get_database(database_type)
@@ -294,37 +310,7 @@ def dl_convert_graph_to_job(
     node_to_job = {}
     for node in graph.evaluation_sequence:
         db_identifier = database.set(node)
-        """
-        # IMPLICIT BATCHING:
-        # Create individual tasks for each batch if the batch size is defined
-        # Feed the calculated frame range to each batch
-        node_batch_size = node.metadata.get("batch_size")
-        node_input_batch_items = node.inputs.get("batch_items")
-        if node_batch_size and node_input_batch_items:
-            batch_size = node.metadata["batch_size"]
-            batch_items = node_input_batch_items.value
-            batch_index = 0
-            while batch_index < len(batch_items) - 1:
-                batch_end = batch_index + batch_size
-                if batch_end > len(batch_items) - 1:
-                    batch_end = len(batch_items)
-                batch_item_range = batch_items[batch_index:batch_end]
 
-                task = {"name": "{0}-{1}".format(node.name, batch_index / batch_size)}
-                command = COMMANDS.get(node.metadata.get("interpreter", "python"), None)
-
-                task["command"] = command.format(
-                    serialized_json=serialized_json,
-                    batch_items=batch_item_range,
-                    database=database,
-                )
-                job["tasks"].append(task)
-
-                tasks[node.name].append(task)
-
-                batch_index += batch_size
-        else:
-        """
         job = DLJobs.Job()
         node_to_job[node.name] = job
         jobs.append(job)
@@ -334,16 +320,35 @@ def dl_convert_graph_to_job(
         job.JobName = node.name
         # Env
         job.SetJobEnvironmentKeyValue(EnvironmentVariables.identifier, db_identifier)
-        job.SetJobEnvironmentKeyValue(EnvironmentVariables.batch_range, str([]))
         job.SetJobEnvironmentKeyValue(EnvironmentVariables.database_type, database_type)
         # Plugin
         job.JobPlugin = "Command"
         command_executable = COMMAND_INTERPRETER[
             node.metadata.get("interpreter", "python")
         ]
-        command_args = DL_COMMAND_RUNNERS["runner"]
-        command = "{exe} {args}".format(exe=command_executable, args=command_args)
+        command_args = [
+            DL_COMMAND_RUNNERS["runner"],
+            "<FRAME_START>",
+            "<FRAME_END>"
+        ]
+        command = "{exe} {args}".format(exe=command_executable, args=" ".join(command_args))
         job.SetJobPluginInfoKeyValue("Command", command)
+        # Batch range (frames/items)
+        # IMPLICIT BATCHING:
+        # Create individual tasks for each batch if the batch size is defined
+        # Feed the calculated frame range to each batch
+        batch_size_input = node.inputs.get("batch_size")
+        batch_items_input = node.inputs.get("batch_items")
+        if batch_items_input and batch_items_input.value:
+            batch_size = 1
+            if batch_size_input:
+                batch_size = batch_size_input.value
+            # TODO Add a pre job scripts that modifies these dynamically.
+            batch_frame_offset = node.metadata.get("batch_frame_offset", 0)
+            batch_frame_start = 0 + batch_frame_offset
+            batch_frame_end = len(batch_items_input.value) + batch_frame_offset
+            job.JobFrames = "{}-{}".format(batch_frame_start, batch_frame_end)
+            job.JobFramesPerTask = batch_size
 
     # Submit
     job: DLJobs.Job
@@ -367,3 +372,5 @@ def dl_convert_graph_to_job(
         if not jobWebServiceData:
             raise Exception("Failed to submit job.")
         job.deserializeWebAPI(jobWebServiceData)
+
+    return jobs
