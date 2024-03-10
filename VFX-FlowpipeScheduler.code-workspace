@@ -9,7 +9,9 @@
 	],
 	"settings": {
 		"files.exclude": {
-			"*.rdb": true
+			"*.rdb": true,
+			"*.pyc": true,
+			"**/__pycache__": true
 		},
 		"git.autofetch": true,
 		"git.autofetchPeriod": 3600,

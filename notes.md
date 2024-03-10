@@ -32,8 +32,5 @@ redis-cli shutdown
 
 
 # ToDos
-- Make evaluate loop support multiple identifiers
-- Add Multi-Interpreters
 - Add deadline scripts support
 - Add deadline custom dependency support/task grouping for node interpreters/task dependency instead of job dependency
-- RedisDataCleanup

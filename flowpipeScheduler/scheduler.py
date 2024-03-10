@@ -27,6 +27,8 @@ class NodeInputNames:
     batch_frame_offset = "batch_frame_offset" # Add a 'cosmetic only' frame offset for UIs.
 
 class NodeInputMetadata:
+    interpreter = "interpreter"
+    interpreter_version = "interpreter_version"
     job_overrides = "job_overrides"
 
 
@@ -141,11 +143,23 @@ def get_database(database_type):
 
 # Command templates for different interpreters
 COMMAND_INTERPRETER = {
-    "python": os.path.join(os.environ["PROJECT"], "VFX-FlowpipeScheduler/ext/python/bin/python"),
-    "python_39": "python3.9",
-    "python_311": "python3.11",
-    "python_312": "python3.12",
-    "houdini": "hython",
+    "python": {
+        "default": os.path.join(os.environ["PROJECT"], "VFX-FlowpipeScheduler/ext/python/bin/python"),
+        "python_39": "python3.9",
+        "python_311": "python3.11",
+        "python_312": "python3.12",
+    },
+    "houdini": {
+        "default": "/opt/hfs20.0/bin/hython",
+        "houdini_190": "/opt/hfs19.0/bin/hython",
+        "houdini_195": "/opt/hfs19.5/bin/hython",
+        "houdini_20": "/opt/hfs20.0/bin/hython",
+    } 
+}
+
+COMMAND_RESOURCE_LIMITS = {
+    "houdini": "houdini",
+    "python": "cache"
 }
 
 
@@ -369,9 +383,9 @@ def dl_send_graph_to_farm(
         job.JobName = node.name
         # Plugin
         job.JobPlugin = "Command"
-        command_executable = COMMAND_INTERPRETER[
-            node.metadata.get("interpreter", "python")
-        ]
+        node_interpreter = node.metadata.get("interpreter", "python")
+        node_interpreter_version = node.metadata.get("interpreter_version", "default")
+        command_executable = COMMAND_INTERPRETER[node_interpreter][node_interpreter_version]
         command_args = [
             DL_COMMAND_RUNNERS["runner"],
             "<FRAME_START>",
@@ -379,6 +393,10 @@ def dl_send_graph_to_farm(
         ]
         command = "{exe} {args}".format(exe=command_executable, args=" ".join(command_args))
         job.SetJobPluginInfoKeyValue("Command", command)
+        # Limits
+        job_resource_limit_interpreter = COMMAND_RESOURCE_LIMITS.get(node_interpreter)
+        if job_resource_limit_interpreter:
+            job.SetJobLimitGroups([job_resource_limit_interpreter])
         # Batch range (frames/items)
         batch_size_input = node.inputs.get(NodeInputNames.batch_size)
         batch_items_input = node.inputs.get(NodeInputNames.batch_items)
@@ -439,14 +457,13 @@ def dl_send_graph_to_farm(
             # Dependent jobs are always set to active,
             # since they will be pending anyway.
             job.JobStatus = DLJobs.JobStatus.Active
-
-        jobData, pluginData, auxFilePaths = (
+        job_data, plugin_data, aux_file_paths = (
             job.serializeSubmissionCommandlineDictionaries()
         )
-        jobWebServiceData = connection.Jobs.SubmitJob(jobData, pluginData, auxFilePaths)
-        if not jobWebServiceData:
+        job_webservice_data = connection.Jobs.SubmitJob(job_data, plugin_data, aux_file_paths)
+        if not job_webservice_data:
             raise Exception("Failed to submit job.")
-        job.deserializeWebAPI(jobWebServiceData)
+        job.deserializeWebAPI(job_webservice_data)
         job_id_to_job[job.JobId] = job
         # Align frame offsets of frame dependent dependencies
         # TODO HINT Disable this if the extra query causes a performance hint.
