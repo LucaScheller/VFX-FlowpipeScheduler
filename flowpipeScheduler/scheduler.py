@@ -8,6 +8,7 @@ from tempfile import gettempdir
 import redis
 from flowpipe import Graph, INode, Node
 from deadlineAPI.Deadline import Jobs as DLJobs
+from deadlineConfigure.etc.constants import EnvironmentVariables as DL_GlobalEnvironmentVariables
 
 # -----------------------------------------------------------------------------
 #
@@ -17,7 +18,7 @@ from deadlineAPI.Deadline import Jobs as DLJobs
 
 
 class EnvironmentVariables:
-    identifier = "FP_IDENTIFIER"
+    identifiers = "FP_IDENTIFIERS"
     database_type = "FP_DATABASE_TYPE"
 
 class NodeInputNames:
@@ -27,6 +28,7 @@ class NodeInputNames:
 
 class NodeInputMetadata:
     job_overrides = "job_overrides"
+
 
 # -----------------------------------------------------------------------------
 #
@@ -159,26 +161,43 @@ def evaluate_on_farm_through_env(batch_range=None):
     Args:
         batch_range [tuple(int, int, int)| None]: The batch range.
     """
-    identifier = os.environ[EnvironmentVariables.identifier]
+    identifiers = os.environ[EnvironmentVariables.identifiers].split(",")
     database_type = os.environ[EnvironmentVariables.database_type]
-    evaluate_on_farm(identifier, batch_range, database_type)
+    evaluate_on_farm(identifiers, batch_range, database_type)
 
 
 def evaluate_on_farm(
+    identifiers, batch_range=None, database_type=DatabaseType.RedisDatabase
+):
+    """Evaluate the node(s) based on the given identifier(s).
+    Args:
+        identifiers (list[str]): A list of identifiers.
+        batch_range (list[any]): A list of elements to batch.
+        database_type (DatabaseType): A database type.
+    """
+    for identifier in identifiers:
+        evaluate_on_farm_kernel(identifier, batch_range=batch_range, database_type=database_type)
+
+
+def evaluate_on_farm_kernel(
     identifier, batch_range=None, database_type=DatabaseType.RedisDatabase
 ):
-    """Evaluate the node behind the given json file.
-
-    1. Deserialize the node
-    2. Collect any input values from any upstream dependencies
-        For implicit batching, the given frames are assigned to the node,
-        overriding whatever might be stored in the json file, becuase all
-        batches share the same json file.
-    3. Evaluate the node
-    4. Serialize the node back into its original file
-        For implicit farm conversion, the serialization only happens once,
-        for the 'last' batch, knowing that the last batch in numbers might
-        not be the 'last' batch actually executed.
+    """Evaluate the node based on the given identifier.
+    Notes:
+        1. Deserialize the node
+        2. Collect any input values from any upstream dependencies
+            For implicit batching, the given frames are assigned to the node,
+            overriding whatever might be stored in the json file, becuase all
+            batches share the same json file.
+        3. Evaluate the node
+        4. Serialize the node back into its original file
+            For implicit farm conversion, the serialization only happens once,
+            for the 'last' batch, knowing that the last batch in numbers might
+            not be the 'last' batch actually executed.
+    Args:
+        identifier (str): A identifier.
+        batch_range (list[any]): A list of elements to batch.
+        database_type (DatabaseType): A database type.
     """
 
     # Database
@@ -259,6 +278,7 @@ def evaluate_on_farm(
 #
 # -----------------------------------------------------------------------------
 
+
 def dl_get_job_default():
     """Create a job with default farm submission settings.
     Returns:
@@ -268,7 +288,7 @@ def dl_get_job_default():
     if not instance:
         job = instance = dl_get_job_default.instance = DLJobs.Job()
         job.JobDepartment = "pipeline"
-        job.JobPool = "utility"
+        job.JobPool = "stations"
         job.JobGroup = "pipeline"
     return instance
 
@@ -310,10 +330,10 @@ def dl_job_script_evaluate_on_farm_through_env(script_type: str):
         "task_pre": DL_EnvironmentVariables.task_pre_script_identifier,
         "task_post": DL_EnvironmentVariables.task_post_script_identifier,
     }
-    identifier = os.environ[script_type_to_env_var[script_type]]
+    identifiers = os.environ[script_type_to_env_var[script_type]].split(",")
     batch_range = None
     database_type = os.environ[EnvironmentVariables.database_type]
-    evaluate_on_farm(identifier, batch_range, database_type)
+    evaluate_on_farm(identifiers, batch_range, database_type)
 
 
 def dl_send_graph_to_farm(
@@ -403,8 +423,11 @@ def dl_send_graph_to_farm(
         # Store job in database
         db_identifier = database.set(node)
         # Env
-        job.SetJobEnvironmentKeyValue(EnvironmentVariables.identifier, db_identifier)
+        job.SetJobEnvironmentKeyValue(EnvironmentVariables.identifiers, db_identifier)
         job.SetJobEnvironmentKeyValue(EnvironmentVariables.database_type, database_type)
+        if database_type == DatabaseType.RedisDatabase:
+            job.JobEventOptIns = job.JobEventOptIns + ["Redis"]
+            job.SetJobEnvironmentKeyValue(DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, db_identifier)
         # Dependencies
         node_name = job.JobName
         node = graph[node_name]

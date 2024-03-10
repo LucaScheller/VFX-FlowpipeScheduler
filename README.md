@@ -1,4 +1,4 @@
-# FlowPipe Scheduler
+# Flowpipe Scheduler
 
 This repository is still work in progress, please check back at a later time.
 
