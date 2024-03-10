@@ -8,7 +8,9 @@ from tempfile import gettempdir
 import redis
 from flowpipe import Graph, INode, Node
 from deadlineAPI.Deadline import Jobs as DLJobs
-from deadlineConfigure.etc.constants import EnvironmentVariables as DL_GlobalEnvironmentVariables
+from deadlineConfigure.etc.constants import (
+    EnvironmentVariables as DL_GlobalEnvironmentVariables,
+)
 
 # -----------------------------------------------------------------------------
 #
@@ -21,15 +23,19 @@ class EnvironmentVariables:
     identifiers = "FP_IDENTIFIERS"
     database_type = "FP_DATABASE_TYPE"
 
+
 class NodeInputNames:
     batch_items = "batch_items"
     batch_size = "batch_size"
-    batch_frame_offset = "batch_frame_offset" # Add a 'cosmetic only' frame offset for UIs.
+
 
 class NodeInputMetadata:
+    batch_frame_offset = (
+        "batch_frame_offset"  # Add a 'cosmetic only' frame offset for UIs.
+    )
     interpreter = "interpreter"
     interpreter_version = "interpreter_version"
-    job_overrides = "job_overrides"
+    graph_optimize = "graph_optimize"
 
 
 # -----------------------------------------------------------------------------
@@ -144,7 +150,9 @@ def get_database(database_type):
 # Command templates for different interpreters
 COMMAND_INTERPRETER = {
     "python": {
-        "default": os.path.join(os.environ["PROJECT"], "VFX-FlowpipeScheduler/ext/python/bin/python"),
+        "default": os.path.join(
+            os.environ["PROJECT"], "VFX-FlowpipeScheduler/ext/python/bin/python"
+        ),
         "python_39": "python3.9",
         "python_311": "python3.11",
         "python_312": "python3.12",
@@ -154,13 +162,10 @@ COMMAND_INTERPRETER = {
         "houdini_190": "/opt/hfs19.0/bin/hython",
         "houdini_195": "/opt/hfs19.5/bin/hython",
         "houdini_20": "/opt/hfs20.0/bin/hython",
-    } 
+    },
 }
 
-COMMAND_RESOURCE_LIMITS = {
-    "houdini": "houdini",
-    "python": "cache"
-}
+COMMAND_RESOURCE_LIMITS = {"houdini": "houdini", "python": "cache"}
 
 
 # -----------------------------------------------------------------------------
@@ -190,7 +195,9 @@ def evaluate_on_farm(
         database_type (DatabaseType): A database type.
     """
     for identifier in identifiers:
-        evaluate_on_farm_kernel(identifier, batch_range=batch_range, database_type=database_type)
+        evaluate_on_farm_kernel(
+            identifier, batch_range=batch_range, database_type=database_type
+        )
 
 
 def evaluate_on_farm_kernel(
@@ -198,16 +205,10 @@ def evaluate_on_farm_kernel(
 ):
     """Evaluate the node based on the given identifier.
     Notes:
-        1. Deserialize the node
+        1. Deserialize the node from the database
         2. Collect any input values from any upstream dependencies
-            For implicit batching, the given frames are assigned to the node,
-            overriding whatever might be stored in the json file, becuase all
-            batches share the same json file.
         3. Evaluate the node
-        4. Serialize the node back into its original file
-            For implicit farm conversion, the serialization only happens once,
-            for the 'last' batch, knowing that the last batch in numbers might
-            not be the 'last' batch actually executed.
+        4. Serialize the node back to the database
     Args:
         identifier (str): A identifier.
         batch_range (list[any]): A list of elements to batch.
@@ -232,7 +233,9 @@ def evaluate_on_farm_kernel(
             # Check for sub plugs (this is a flowpipe bug TODO Report that we can't mix sub plug and plug inputs)
             if "." in output_plug:
                 sub_output_plug, sub_output_plug_idx = output_plug.split(".")
-                node.inputs[name].value = upstream_node.outputs[sub_output_plug][sub_output_plug_idx].value
+                node.inputs[name].value = upstream_node.outputs[sub_output_plug][
+                    sub_output_plug_idx
+                ].value
             else:
                 node.inputs[name].value = upstream_node.outputs[output_plug].value
         # Sub plugs
@@ -257,12 +260,12 @@ def evaluate_on_farm_kernel(
     batch_enable = False
     all_batch_items = []
     batch_items_plug = node.inputs.get(NodeInputNames.batch_items, None)
-    batch_frame_offset = node.metadata.get(NodeInputNames.batch_frame_offset, 0)
+    batch_frame_offset = node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
     if batch_range is not None and batch_items_plug is not None:
         if batch_items_plug.value:
             batch_enable = True
             if batch_frame_offset != 0:
-                batch_range = list(batch_range) # tuple to list
+                batch_range = list(batch_range)  # tuple to list
                 batch_range[0] -= batch_frame_offset
                 batch_range[1] -= batch_frame_offset
             all_batch_items = node.inputs[NodeInputNames.batch_items].value
@@ -310,8 +313,19 @@ def dl_get_job_default():
 class DL_EnvironmentVariables:
     job_pre_script_identifier = "DL_JOB_PRE_SCRIPT_FP_IDENTIFIER"
     job_post_script_identifier = "DL_JOB_POST_SCRIPT_FP_IDENTIFIER"
-    task_pre_script_identifier = "DL_TASK_PRE_SCRIPT_FP_IDENTIFIER"
-    task_post_script_identifier = "DL_TASK_POST_SCRIPT_FP_IDENTIFIER"
+    job_task_pre_script_identifier = "DL_JOB_TASK_PRE_SCRIPT_FP_IDENTIFIER"
+    job_task_post_script_identifier = "DL_JOB_TASK_POST_SCRIPT_FP_IDENTIFIER"
+
+
+class DL_NodeInputMetadata(NodeInputMetadata):
+    job_overrides = "job_overrides"
+    job_optimize_graph = "job_optimize_graph"
+    job_script_type = "job_script_type"
+
+
+class DL_JobScriptType:
+    pre = "pre"
+    post = "post"
 
 
 DL_COMMAND_RUNNERS = {
@@ -324,11 +338,11 @@ DL_COMMAND_RUNNERS = {
     "job_post_script": os.path.join(
         os.path.dirname(__file__), "deadline", "runners", "job_post_script_runner.py"
     ),
-    "task_pre_script": os.path.join(
-        os.path.dirname(__file__), "deadline", "runners", "task_pre_script_runner.py"
+    "job_task_pre_script": os.path.join(
+        os.path.dirname(__file__), "deadline", "runners", "job_task_pre_script_runner.py"
     ),
-    "task_post_script": os.path.join(
-        os.path.dirname(__file__), "deadline", "runners", "task_post_script_runner.py"
+    "job_task_post_script": os.path.join(
+        os.path.dirname(__file__), "deadline", "runners", "job_task_post_script_runner.py"
     ),
 }
 
@@ -385,13 +399,13 @@ def dl_send_graph_to_farm(
         job.JobPlugin = "Command"
         node_interpreter = node.metadata.get("interpreter", "python")
         node_interpreter_version = node.metadata.get("interpreter_version", "default")
-        command_executable = COMMAND_INTERPRETER[node_interpreter][node_interpreter_version]
-        command_args = [
-            DL_COMMAND_RUNNERS["runner"],
-            "<FRAME_START>",
-            "<FRAME_END>"
+        command_executable = COMMAND_INTERPRETER[node_interpreter][
+            node_interpreter_version
         ]
-        command = "{exe} {args}".format(exe=command_executable, args=" ".join(command_args))
+        command_args = [DL_COMMAND_RUNNERS["runner"], "<FRAME_START>", "<FRAME_END>"]
+        command = "{exe} {args}".format(
+            exe=command_executable, args=" ".join(command_args)
+        )
         job.SetJobPluginInfoKeyValue("Command", command)
         # Limits
         job_resource_limit_interpreter = COMMAND_RESOURCE_LIMITS.get(node_interpreter)
@@ -406,33 +420,39 @@ def dl_send_graph_to_farm(
             if batch_size_input:
                 batch_size = batch_size_input.value
             # TODO Add a pre job scripts that modify these dynamically.
-            batch_frame_offset = node.metadata.get(NodeInputNames.batch_frame_offset, 0)
+            batch_frame_offset = node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
             batch_frame_start = 0 + batch_frame_offset
             batch_frame_end = batch_item_count + batch_frame_offset
             job.JobFrames = "{}-{}".format(batch_frame_start, batch_frame_end)
             job.JobFramesPerTask = batch_size
             # Enable batch frame dependencies if
-            # batch_size and batch item count align. 
+            # batch_size and batch item count align.
             batch_frame_dependency = False
             for upstream_node in node.parents:
-                upstream_batch_size_input = upstream_node.inputs.get(NodeInputNames.batch_size)
-                upstream_batch_items_input = upstream_node.inputs.get(NodeInputNames.batch_items)
+                upstream_batch_size_input = upstream_node.inputs.get(
+                    NodeInputNames.batch_size
+                )
+                upstream_batch_items_input = upstream_node.inputs.get(
+                    NodeInputNames.batch_items
+                )
                 if upstream_batch_items_input and upstream_batch_items_input.value:
                     upstream_batch_item_count = len(upstream_batch_items_input.value)
                     upstream_batch_size = 1
                     if upstream_batch_size_input:
                         upstream_batch_size = upstream_batch_size_input.value
                     batch_size_matches = batch_size == upstream_batch_size
-                    batch_item_count_matches = batch_item_count == upstream_batch_item_count
+                    batch_item_count_matches = (
+                        batch_item_count == upstream_batch_item_count
+                    )
                     if batch_size_matches and batch_item_count_matches:
                         batch_frame_dependency = True
             job.JobIsFrameDependent = batch_frame_dependency
         # Job Overrides
-        job_overrides = node.metadata.get(NodeInputMetadata.job_overrides, None)
+        job_overrides = node.metadata.get(DL_NodeInputMetadata.job_overrides, None)
         if job_overrides is not None:
             job.applyChangeSet(job_overrides)
             # Force clear this submit only data
-            node.metadata.pop(NodeInputMetadata.job_overrides, None)
+            node.metadata.pop(DL_NodeInputMetadata.job_overrides, None)
 
     # Submit
     job: DLJobs.Job
@@ -445,7 +465,9 @@ def dl_send_graph_to_farm(
         job.SetJobEnvironmentKeyValue(EnvironmentVariables.database_type, database_type)
         if database_type == DatabaseType.RedisDatabase:
             job.JobEventOptIns = job.JobEventOptIns + ["Redis"]
-            job.SetJobEnvironmentKeyValue(DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, db_identifier)
+            job.SetJobEnvironmentKeyValue(
+                DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, db_identifier
+            )
         # Dependencies
         node_name = job.JobName
         node = graph[node_name]
@@ -460,7 +482,9 @@ def dl_send_graph_to_farm(
         job_data, plugin_data, aux_file_paths = (
             job.serializeSubmissionCommandlineDictionaries()
         )
-        job_webservice_data = connection.Jobs.SubmitJob(job_data, plugin_data, aux_file_paths)
+        job_webservice_data = connection.Jobs.SubmitJob(
+            job_data, plugin_data, aux_file_paths
+        )
         if not job_webservice_data:
             raise Exception("Failed to submit job.")
         job.deserializeWebAPI(job_webservice_data)
@@ -488,9 +512,9 @@ def dl_send_graph_to_farm(
             for job_dependency in job.JobDependencies:
                 dependent_job = job_id_to_job[job_dependency.JobID]
                 dependent_job_frame_first = sorted(dependent_job.JobFramesList)[0]
-                job_dependency.OverrideFrameOffsets=True
+                job_dependency.OverrideFrameOffsets = True
                 if job_frame_first != dependent_job_frame_first:
-                    job_dependency.IgnoreFrameOffsets=True
+                    job_dependency.IgnoreFrameOffsets = True
                     job_dependencies_changed = True
             if job_dependencies_changed:
                 state = connection.Jobs.SaveJob(job.serializeWebAPI())
