@@ -175,7 +175,7 @@ COMMAND_RESOURCE_LIMITS = {"houdini": "houdini", "python": "cache"}
 # -----------------------------------------------------------------------------
 
 
-def evaluate_on_farm_through_env(batch_range=None):
+def evaluate_on_farm_through_env(batch_range: tuple[int, int, int]):
     """Evaluate on farm by extracting the evaluation data through environment variables.
     Args:
         batch_range [tuple(int, int, int)| None]: The batch range.
@@ -186,7 +186,7 @@ def evaluate_on_farm_through_env(batch_range=None):
 
 
 def evaluate_on_farm(
-    identifiers, batch_range=None, database_type=DatabaseType.RedisDatabase
+    identifiers: list[str], batch_range: tuple[int, int, int], database_type: DatabaseType.RedisDatabase
 ):
     """Evaluate the node(s) based on the given identifier(s).
     Args:
@@ -201,7 +201,7 @@ def evaluate_on_farm(
 
 
 def evaluate_on_farm_kernel(
-    identifier, batch_range=None, database_type=DatabaseType.RedisDatabase
+    identifier: str, batch_range: tuple[int, int, int], database_type: DatabaseType.RedisDatabase
 ):
     """Evaluate the node based on the given identifier.
     Notes:
@@ -211,7 +211,7 @@ def evaluate_on_farm_kernel(
         4. Serialize the node back to the database
     Args:
         identifier (str): A identifier.
-        batch_range (list[any]): A list of elements to batch.
+        batch_range (tuple[int, int, int]|None): A list of elements to batch.
         database_type (DatabaseType): A database type.
     """
 
@@ -311,10 +311,10 @@ def dl_get_job_default():
 
 
 class DL_EnvironmentVariables:
-    job_pre_script_identifier = "DL_JOB_PRE_SCRIPT_FP_IDENTIFIER"
-    job_post_script_identifier = "DL_JOB_POST_SCRIPT_FP_IDENTIFIER"
-    job_task_pre_script_identifier = "DL_JOB_TASK_PRE_SCRIPT_FP_IDENTIFIER"
-    job_task_post_script_identifier = "DL_JOB_TASK_POST_SCRIPT_FP_IDENTIFIER"
+    job_pre_script_identifiers = "DL_JOB_PRE_SCRIPT_FP_IDENTIFIERS"
+    job_post_script_identifiers = "DL_JOB_POST_SCRIPT_FP_IDENTIFIERS"
+    job_task_pre_script_identifiers = "DL_JOB_TASK_PRE_SCRIPT_FP_IDENTIFIERS"
+    job_task_post_script_identifiers = "DL_JOB_TASK_POST_SCRIPT_FP_IDENTIFIERS"
 
 
 class DL_NodeInputMetadata(NodeInputMetadata):
@@ -347,19 +347,20 @@ DL_COMMAND_RUNNERS = {
 }
 
 
-def dl_job_script_evaluate_on_farm_through_env(script_type: str):
+def dl_job_script_evaluate_on_farm_through_env(script_type: str, batch_range: tuple[int, int, int]):
     """Evaluate on farm by extracting the evaluation data through environment variables.
     Args:
-        script_type (str): The job script type, one of ['job_pre', 'job_post', 'task_pre', 'task_post']
+        script_type (str): The job script type, one of ['job_pre', 'job_post', 'job_task_pre', 'job_task_post']
+        batch_range (list[any]): A list of elements to batch.
     """
     script_type_to_env_var = {
-        "job_pre": DL_EnvironmentVariables.job_pre_script_identifier,
-        "job_post": DL_EnvironmentVariables.job_post_script_identifier,
-        "task_pre": DL_EnvironmentVariables.task_pre_script_identifier,
-        "task_post": DL_EnvironmentVariables.task_post_script_identifier,
+        "job_pre": DL_EnvironmentVariables.job_pre_script_identifiers,
+        "job_post": DL_EnvironmentVariables.job_post_script_identifiers,
+        "job_task_pre": DL_EnvironmentVariables.job_task_pre_script_identifiers,
+        "job_task_post": DL_EnvironmentVariables.job_task_post_script_identifiers,
     }
     identifiers = os.environ[script_type_to_env_var[script_type]].split(",")
-    batch_range = None
+    batch_range = batch_range
     database_type = os.environ[EnvironmentVariables.database_type]
     evaluate_on_farm(identifiers, batch_range, database_type)
 
@@ -386,9 +387,10 @@ def dl_send_graph_to_farm(
     # Convert to DL jobs
     node_to_job = {}
     for node in graph.evaluation_sequence:
+        ### CONFIG START ###
+        # Job
         job = DLJobs.Job()
-        node_to_job[node.name] = job
-        jobs.append(job)
+
         # Defaults
         job.applyChangeSet(dl_get_job_default())
         # General
@@ -397,8 +399,8 @@ def dl_send_graph_to_farm(
         job.JobName = node.name
         # Plugin
         job.JobPlugin = "Command"
-        node_interpreter = node.metadata.get("interpreter", "python")
-        node_interpreter_version = node.metadata.get("interpreter_version", "default")
+        node_interpreter = node.metadata.get(DL_NodeInputMetadata.interpreter, "python")
+        node_interpreter_version = node.metadata.get(DL_NodeInputMetadata.interpreter_version, "default")
         command_executable = COMMAND_INTERPRETER[node_interpreter][
             node_interpreter_version
         ]
@@ -412,11 +414,12 @@ def dl_send_graph_to_farm(
         if job_resource_limit_interpreter:
             job.SetJobLimitGroups([job_resource_limit_interpreter])
         # Batch range (frames/items)
-        batch_size_input = node.inputs.get(NodeInputNames.batch_size)
         batch_items_input = node.inputs.get(NodeInputNames.batch_items)
+        batch_item_count = -1
+        batch_size_input = node.inputs.get(NodeInputNames.batch_size)
+        batch_size = 1
         if batch_items_input and batch_items_input.value:
             batch_item_count = len(batch_items_input.value)
-            batch_size = 1
             if batch_size_input:
                 batch_size = batch_size_input.value
             # TODO Add a pre job scripts that modify these dynamically.
@@ -453,21 +456,89 @@ def dl_send_graph_to_farm(
             job.applyChangeSet(job_overrides)
             # Force clear this submit only data
             node.metadata.pop(DL_NodeInputMetadata.job_overrides, None)
+        # Store node in database
+        db_identifiers = [database.set(node)]
+        # Env
+        job.SetJobEnvironmentKeyValue(EnvironmentVariables.identifiers, ",".join(db_identifiers))
+        job.SetJobEnvironmentKeyValue(EnvironmentVariables.database_type, database_type)
+        if database_type == DatabaseType.RedisDatabase:
+            job.JobEventOptIns = job.JobEventOptIns + ["Redis"]
+            job.SetJobEnvironmentKeyValue(
+                DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, ",".join(db_identifiers)
+            )
+        ### CONFIG END ###
+        node_to_job[node.name] = job
+        jobs.append(job)
+        # We use 'continue' below, so make sure all configuration related edits are done above.
+        # Below we re-arrange the graph to be optimized for submission.
+
+        # Script (Attach node to previous or next job if possible based on node config)
+        node_job_script_type = node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
+        if node_job_script_type is not None:
+            if node_job_script_type == DL_JobScriptType.post:
+                # Validate
+                # Parents
+                node_parents = node.parents
+                if not node_parents:
+                    continue
+                if not len(node_parents) == 1:
+                    continue
+                node_parent = list(node_parents)[0]
+                # Interpreter
+                node_parent_interpreter = node_parent.metadata.get(DL_NodeInputMetadata.interpreter, "python")
+                node_parent_interpreter_version = node_parent.metadata.get(DL_NodeInputMetadata.interpreter_version, "default")
+                if not node_parent_interpreter == "python" or not node_interpreter == "python":
+                    continue
+                if not node_parent_interpreter_version == "default" or not node_interpreter_version == "default":
+                    continue
+                """# Deadline only supports python scripts in its native interpreter
+                node_parent_interpreter = node_parent.metadata.get(DL_NodeInputMetadata.interpreter, "python")
+                node_parent_interpreter_version = node_parent.metadata.get(DL_NodeInputMetadata.interpreter_version, "default")
+                if node_interpreter != node_parent_interpreter:
+                    continue
+                if node_interpreter_version != node_parent_interpreter_version:
+                    continue
+                """
+                # Batch range
+                batch_enabled = False
+                parent_batch_items_input = node_parent.inputs.get(NodeInputNames.batch_items)
+                if (batch_items_input and parent_batch_items_input):
+                    parent_batch_item_count = len(batch_items_input.value)
+                    if batch_item_count != parent_batch_item_count:
+                        continue
+                    parent_batch_size_input = node_parent.inputs.get(NodeInputNames.batch_size)
+                    parent_batch_size = 1
+                    if parent_batch_size_input:
+                        parent_batch_size = parent_batch_size_input.value
+                    if batch_size != parent_batch_size:
+                        continue
+                    batch_enabled = True
+                # Parent job
+                parent_job: DLJobs.Job
+                parent_job = node_to_job[node_parent.name]
+                # Re-direct node
+                node_to_job[node.name] = parent_job
+                jobs.pop(-1)
+                post_script_token = DL_EnvironmentVariables.job_post_script_identifiers if not batch_enabled else DL_EnvironmentVariables.job_task_post_script_identifiers
+                parent_post_script_db_identifiers = parent_job.GetJobEnvironmentKeyValue(post_script_token) or ""
+                parent_post_script_db_identifiers = [i for i in parent_post_script_db_identifiers.split(",") if i]
+                combined_post_script_db_identifiers = parent_post_script_db_identifiers + db_identifiers
+                parent_job.SetJobEnvironmentKeyValue(post_script_token, ",".join(combined_post_script_db_identifiers))
+                if not batch_enabled:
+                    parent_job.JobPostJobScript = DL_COMMAND_RUNNERS["job_post_script"]
+                else:
+                    parent_job.JobPostTaskScript = DL_COMMAND_RUNNERS["job_task_post_script"]
+                if database_type == DatabaseType.RedisDatabase:
+                    parent_job_redis_keys = parent_job.GetJobEnvironmentKeyValue(DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS).split(",")
+                    parent_job_redis_keys = list(set(parent_job_redis_keys + combined_post_script_db_identifiers))
+                    parent_job.SetJobEnvironmentKeyValue(
+                        DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, ",".join(parent_job_redis_keys)
+                    )
 
     # Submit
     job: DLJobs.Job
     job_id_to_job = {}
     for job in jobs:
-        # Store job in database
-        db_identifier = database.set(node)
-        # Env
-        job.SetJobEnvironmentKeyValue(EnvironmentVariables.identifiers, db_identifier)
-        job.SetJobEnvironmentKeyValue(EnvironmentVariables.database_type, database_type)
-        if database_type == DatabaseType.RedisDatabase:
-            job.JobEventOptIns = job.JobEventOptIns + ["Redis"]
-            job.SetJobEnvironmentKeyValue(
-                DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, db_identifier
-            )
         # Dependencies
         node_name = job.JobName
         node = graph[node_name]
