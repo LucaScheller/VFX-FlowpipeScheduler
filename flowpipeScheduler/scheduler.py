@@ -331,7 +331,6 @@ class DL_EnvVars:
 
 class DL_NodeInputMetadata(NodeInputMetadata):
     job_overrides = "job_overrides"
-    job_optimize_graph = "job_optimize_graph"
     job_script_type = "job_script_type"
 
 
