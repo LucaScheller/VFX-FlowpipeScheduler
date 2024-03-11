@@ -512,20 +512,25 @@ def dl_send_graph_to_farm(
                 ## Batch range
                 script_batch_enabled = False
                 child_batch_items_input = child_node.inputs.get(NodeInputNames.batch_items)
-                if (batch_items_input and batch_items_input.value) and (child_batch_items_input and child_batch_items_input.value):
-                    child_batch_item_count = len(batch_items_input.value)
-                    if batch_item_count != child_batch_item_count:
-                        continue
-                    child_batch_size_input = child_node.inputs.get(NodeInputNames.batch_size)
-                    child_batch_size = 1
-                    if child_batch_size_input:
-                        child_batch_size = child_batch_size_input.value
-                    if batch_size != child_batch_size:
-                        continue
-                    child_batch_frame_offset = child_node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
-                    if batch_frame_offset != child_batch_frame_offset:
-                        continue
-                    script_batch_enabled = True
+                valid_batch_items = batch_items_input and batch_items_input.value
+                valid_child_batch_items = child_batch_items_input and child_batch_items_input.value
+                if valid_batch_items and not valid_child_batch_items:
+                    continue
+                if not valid_batch_items and valid_child_batch_items:
+                    continue
+                child_batch_item_count = len(batch_items_input.value)
+                if batch_item_count != child_batch_item_count:
+                    continue
+                child_batch_size_input = child_node.inputs.get(NodeInputNames.batch_size)
+                child_batch_size = 1
+                if child_batch_size_input:
+                    child_batch_size = child_batch_size_input.value
+                if batch_size != child_batch_size:
+                    continue
+                child_batch_frame_offset = child_node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
+                if batch_frame_offset != child_batch_frame_offset:
+                    continue
+                script_batch_enabled = True
                 ## Tag for mapping
                 current_node_job_pre_script_nodes = node_to_job_pre_script_nodes.pop(node.name, [])
                 node_to_job_pre_script_nodes[child_node.name] = current_node_job_pre_script_nodes + [node]
@@ -560,22 +565,27 @@ def dl_send_graph_to_farm(
                     continue
                 """
                 ## Batch range
-                batch_enabled = False
+                script_batch_enabled = False
                 parent_batch_items_input = parent_node.inputs.get(NodeInputNames.batch_items)
-                if (batch_items_input and batch_items_input.value) and (parent_batch_items_input and parent_batch_items_input.value):
-                    parent_batch_item_count = len(batch_items_input.value)
-                    if batch_item_count != parent_batch_item_count:
-                        continue
-                    parent_batch_size_input = parent_node.inputs.get(NodeInputNames.batch_size)
-                    parent_batch_size = 1
-                    if parent_batch_size_input:
-                        parent_batch_size = parent_batch_size_input.value
-                    if batch_size != parent_batch_size:
-                        continue
-                    parent_batch_frame_offset = parent_node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
-                    if batch_frame_offset != parent_batch_frame_offset:
-                        continue
-                    script_batch_enabled = True
+                valid_batch_items = batch_items_input and batch_items_input.value
+                valid_parent_batch_items = parent_batch_items_input and parent_batch_items_input.value
+                if valid_batch_items and not valid_parent_batch_items:
+                    continue
+                if not valid_batch_items and valid_parent_batch_items:
+                    continue
+                parent_batch_item_count = len(batch_items_input.value)
+                if batch_item_count != parent_batch_item_count:
+                    continue
+                parent_batch_size_input = parent_node.inputs.get(NodeInputNames.batch_size)
+                parent_batch_size = 1
+                if parent_batch_size_input:
+                    parent_batch_size = parent_batch_size_input.value
+                if batch_size != parent_batch_size:
+                    continue
+                parent_batch_frame_offset = parent_node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
+                if batch_frame_offset != parent_batch_frame_offset:
+                    continue
+                script_batch_enabled = True
                 ## Parent job
                 parent_job: DLJobs.Job
                 parent_job = node_name_to_job[parent_node.name]

@@ -249,7 +249,7 @@ def api_fl_dl_submit(connection):
         metadata={
             DL_NodeInputMetadata.batch_frame_offset: 1001,
             DL_NodeInputMetadata.interpreter: "python",
-            # DL_NodeInputMetadata.job_script_type: DL_JobScriptType.post,
+            #DL_NodeInputMetadata.job_script_type: DL_JobScriptType.post,
             DL_NodeInputMetadata.job_overrides: job_overrides
         },
         graph=graph
@@ -261,10 +261,10 @@ def api_fl_dl_submit(connection):
     #batch_items = list(range(1, 20))
     renderImageB = RenderImage(
         name="SomeRender B",
-        batch_items=batch_items,
-        batch_size=5,
+        #batch_items=batch_items,
+        #batch_size=5,
         metadata={
-            DL_NodeInputMetadata.batch_frame_offset: 1001,
+            #DL_NodeInputMetadata.batch_frame_offset: 1001,
             DL_NodeInputMetadata.job_script_type: DL_JobScriptType.pre,
         },
         graph=graph
