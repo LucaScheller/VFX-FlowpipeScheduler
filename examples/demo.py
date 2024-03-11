@@ -246,10 +246,12 @@ def api_fl_dl_submit(connection):
         name="SomeRender C",
         batch_items=batch_items,
         batch_size=5,
-        metadata={DL_NodeInputMetadata.batch_frame_offset: 1001,
-                  DL_NodeInputMetadata.interpreter: "python",
-                  DL_NodeInputMetadata.job_script_type: DL_JobScriptType.post,
-                  DL_NodeInputMetadata.job_overrides: job_overrides},
+        metadata={
+            DL_NodeInputMetadata.batch_frame_offset: 1001,
+            DL_NodeInputMetadata.interpreter: "python",
+            # DL_NodeInputMetadata.job_script_type: DL_JobScriptType.post,
+            DL_NodeInputMetadata.job_overrides: job_overrides
+        },
         graph=graph
     )
     renderImageC.outputs["value"]["1"].connect(
@@ -261,7 +263,10 @@ def api_fl_dl_submit(connection):
         name="SomeRender B",
         batch_items=batch_items,
         batch_size=5,
-        metadata={DL_NodeInputMetadata.batch_frame_offset: 1001},
+        metadata={
+            DL_NodeInputMetadata.batch_frame_offset: 1001,
+            DL_NodeInputMetadata.job_script_type: DL_JobScriptType.pre,
+        },
         graph=graph
     )
     renderImageB.outputs["value"]["1"].connect(

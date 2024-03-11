@@ -265,7 +265,7 @@ def evaluate_on_farm_kernel(
         if batch_items_plug.value:
             batch_enable = True
             if batch_frame_offset != 0:
-                batch_range = list(batch_range)  # tuple to list
+                batch_range = list(batch_range) # tuple to list
                 batch_range[0] -= batch_frame_offset
                 batch_range[1] -= batch_frame_offset
             all_batch_items = node.inputs[NodeInputNames.batch_items].value
@@ -385,18 +385,20 @@ def dl_send_graph_to_farm(
     job_batch_name = "{} ({})".format(graph.name, job_batch_hash)
 
     # Convert to DL jobs
-    node_to_job = {}
+    node_name_to_job = {}
+    node_name_to_db_identifier = {}
+    node_to_job_pre_script_nodes = {}
     for node in graph.evaluation_sequence:
         ### CONFIG START ###
         # Job
         job = DLJobs.Job()
-
         # Defaults
         job.applyChangeSet(dl_get_job_default())
         # General
         job.JobStatus = DLJobs.JobStatus.Active
         job.JobBatchName = job_batch_name
         job.JobName = node.name
+        job.sessionData["node_name"] = node.name
         # Plugin
         job.JobPlugin = "Command"
         node_interpreter = node.metadata.get(DL_NodeInputMetadata.interpreter, "python")
@@ -418,7 +420,10 @@ def dl_send_graph_to_farm(
         batch_item_count = -1
         batch_size_input = node.inputs.get(NodeInputNames.batch_size)
         batch_size = 1
+        batch_frame_offset = 0
+        batch_enabled = False
         if batch_items_input and batch_items_input.value:
+            batch_enabled = True # Used by job pre script calculation
             batch_item_count = len(batch_items_input.value)
             if batch_size_input:
                 batch_size = batch_size_input.value
@@ -457,7 +462,9 @@ def dl_send_graph_to_farm(
             # Force clear this submit only data
             node.metadata.pop(DL_NodeInputMetadata.job_overrides, None)
         # Store node in database
-        db_identifiers = [database.set(node)]
+        db_identifier = database.set(node)
+        node_name_to_db_identifier[node.name] = db_identifier
+        db_identifiers = [db_identifier]
         # Env
         job.SetJobEnvironmentKeyValue(EnvironmentVariables.identifiers, ",".join(db_identifiers))
         job.SetJobEnvironmentKeyValue(EnvironmentVariables.database_type, database_type)
@@ -467,64 +474,122 @@ def dl_send_graph_to_farm(
                 DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, ",".join(db_identifiers)
             )
         ### CONFIG END ###
-        node_to_job[node.name] = job
+        node_name_to_job[node.name] = job
         jobs.append(job)
         # We use 'continue' below, so make sure all configuration related edits are done above.
         # Below we re-arrange the graph to be optimized for submission.
 
-        # Script (Attach node to previous or next job if possible based on node config)
+        # Job Pre/Post Task Scripts (Attach node to previous or next job if possible based on node config)
         node_job_script_type = node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
         if node_job_script_type is not None:
+            if node_job_script_type == DL_JobScriptType.pre:
+                # Validate
+                ## Children
+                node_children = node.children
+                if not node_children:
+                    continue
+                if not len(node_children) == 1:
+                    continue
+                child_node = list(node_children)[0]
+                ## Script Type
+                child_node_job_script_type = node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
+                if child_node_job_script_type is not None:
+                    if child_node_job_script_type != node_job_script_type:
+                        continue
+                ## Interpreter
+                child_node_interpreter = child_node.metadata.get(DL_NodeInputMetadata.interpreter, "python")
+                child_node_interpreter_version = child_node.metadata.get(DL_NodeInputMetadata.interpreter_version, "default")
+                if not child_node_interpreter == "python" or not node_interpreter == "python":
+                    continue
+                if not child_node_interpreter_version == "default" or not node_interpreter_version == "default":
+                    continue
+                """# Deadline only supports python scripts in its native interpreter
+                if node_interpreter != child_node_interpreter:
+                    continue
+                if node_interpreter_version != child_node_interpreter_version:
+                    continue
+                """
+                ## Batch range
+                script_batch_enabled = False
+                child_batch_items_input = child_node.inputs.get(NodeInputNames.batch_items)
+                if (batch_items_input and batch_items_input.value) and (child_batch_items_input and child_batch_items_input.value):
+                    child_batch_item_count = len(batch_items_input.value)
+                    if batch_item_count != child_batch_item_count:
+                        continue
+                    child_batch_size_input = child_node.inputs.get(NodeInputNames.batch_size)
+                    child_batch_size = 1
+                    if child_batch_size_input:
+                        child_batch_size = child_batch_size_input.value
+                    if batch_size != child_batch_size:
+                        continue
+                    child_batch_frame_offset = child_node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
+                    if batch_frame_offset != child_batch_frame_offset:
+                        continue
+                    script_batch_enabled = True
+                ## Tag for mapping
+                current_node_job_pre_script_nodes = node_to_job_pre_script_nodes.pop(node.name, [])
+                node_to_job_pre_script_nodes[child_node.name] = current_node_job_pre_script_nodes + [node]
+                node_name_to_job.pop(node.name)
+                jobs.pop(-1)
+                continue
             if node_job_script_type == DL_JobScriptType.post:
                 # Validate
-                # Parents
+                ## Parents
                 node_parents = node.parents
                 if not node_parents:
                     continue
                 if not len(node_parents) == 1:
                     continue
-                node_parent = list(node_parents)[0]
-                # Interpreter
-                node_parent_interpreter = node_parent.metadata.get(DL_NodeInputMetadata.interpreter, "python")
-                node_parent_interpreter_version = node_parent.metadata.get(DL_NodeInputMetadata.interpreter_version, "default")
-                if not node_parent_interpreter == "python" or not node_interpreter == "python":
+                parent_node = list(node_parents)[0]
+                ## Script Type
+                parent_node_job_script_type = node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
+                if parent_node_job_script_type is not None:
+                    if parent_node_job_script_type != node_job_script_type:
+                        continue
+                ## Interpreter
+                parent_node_interpreter = parent_node.metadata.get(DL_NodeInputMetadata.interpreter, "python")
+                parent_node_interpreter_version = parent_node.metadata.get(DL_NodeInputMetadata.interpreter_version, "default")
+                if not parent_node_interpreter == "python" or not node_interpreter == "python":
                     continue
-                if not node_parent_interpreter_version == "default" or not node_interpreter_version == "default":
+                if not parent_node_interpreter_version == "default" or not node_interpreter_version == "default":
                     continue
                 """# Deadline only supports python scripts in its native interpreter
-                node_parent_interpreter = node_parent.metadata.get(DL_NodeInputMetadata.interpreter, "python")
-                node_parent_interpreter_version = node_parent.metadata.get(DL_NodeInputMetadata.interpreter_version, "default")
-                if node_interpreter != node_parent_interpreter:
+                if node_interpreter != parent_node_interpreter:
                     continue
-                if node_interpreter_version != node_parent_interpreter_version:
+                if node_interpreter_version != parent_node_interpreter_version:
                     continue
                 """
-                # Batch range
+                ## Batch range
                 batch_enabled = False
-                parent_batch_items_input = node_parent.inputs.get(NodeInputNames.batch_items)
-                if (batch_items_input and parent_batch_items_input):
+                parent_batch_items_input = parent_node.inputs.get(NodeInputNames.batch_items)
+                if (batch_items_input and batch_items_input.value) and (parent_batch_items_input and parent_batch_items_input.value):
                     parent_batch_item_count = len(batch_items_input.value)
                     if batch_item_count != parent_batch_item_count:
                         continue
-                    parent_batch_size_input = node_parent.inputs.get(NodeInputNames.batch_size)
+                    parent_batch_size_input = parent_node.inputs.get(NodeInputNames.batch_size)
                     parent_batch_size = 1
                     if parent_batch_size_input:
                         parent_batch_size = parent_batch_size_input.value
                     if batch_size != parent_batch_size:
                         continue
-                    batch_enabled = True
-                # Parent job
+                    parent_batch_frame_offset = parent_node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
+                    if batch_frame_offset != parent_batch_frame_offset:
+                        continue
+                    script_batch_enabled = True
+                ## Parent job
                 parent_job: DLJobs.Job
-                parent_job = node_to_job[node_parent.name]
+                parent_job = node_name_to_job[parent_node.name]
                 # Re-direct node
-                node_to_job[node.name] = parent_job
+                node_name_to_job[node.name] = parent_job
                 jobs.pop(-1)
-                post_script_token = DL_EnvironmentVariables.job_post_script_identifiers if not batch_enabled else DL_EnvironmentVariables.job_task_post_script_identifiers
+                parent_job_name_expanded = parent_job.JobName.split(", ")
+                parent_job.JobName = ", ".join(parent_job_name_expanded + [node.name])
+                post_script_token = DL_EnvironmentVariables.job_post_script_identifiers if not script_batch_enabled else DL_EnvironmentVariables.job_task_post_script_identifiers
                 parent_post_script_db_identifiers = parent_job.GetJobEnvironmentKeyValue(post_script_token) or ""
                 parent_post_script_db_identifiers = [i for i in parent_post_script_db_identifiers.split(",") if i]
                 combined_post_script_db_identifiers = parent_post_script_db_identifiers + db_identifiers
                 parent_job.SetJobEnvironmentKeyValue(post_script_token, ",".join(combined_post_script_db_identifiers))
-                if not batch_enabled:
+                if not script_batch_enabled:
                     parent_job.JobPostJobScript = DL_COMMAND_RUNNERS["job_post_script"]
                 else:
                     parent_job.JobPostTaskScript = DL_COMMAND_RUNNERS["job_task_post_script"]
@@ -534,17 +599,52 @@ def dl_send_graph_to_farm(
                     parent_job.SetJobEnvironmentKeyValue(
                         DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, ",".join(parent_job_redis_keys)
                     )
+        # Pre-pend pre-scripts collected above.
+        job_pre_scripts_nodes = node_to_job_pre_script_nodes.get(node.name)
+        if job_pre_scripts_nodes:
+            parent_node_names = []
+            parent_node_identifiers = []
+            for parent_node in job_pre_scripts_nodes:
+                node_name_to_job[parent_node.name] = job
+                parent_node_names.append(parent_node.name)
+                parent_node_identifiers.append(node_name_to_db_identifier[parent_node.name])
+            job_name_expanded = job.JobName.split(", ")
+            job.JobName = ", ".join(parent_node_names + job_name_expanded)
+            pre_script_token = DL_EnvironmentVariables.job_pre_script_identifiers if not batch_enabled else DL_EnvironmentVariables.job_task_pre_script_identifiers
+            node_pre_script_db_identifiers = job.GetJobEnvironmentKeyValue(pre_script_token) or "" # This should always be empty.
+            node_pre_script_db_identifiers = [i for i in node_pre_script_db_identifiers.split(",") if i]
+            combined_pre_script_db_identifiers = node_pre_script_db_identifiers + parent_node_identifiers
+            job.SetJobEnvironmentKeyValue(pre_script_token, ",".join(combined_pre_script_db_identifiers))
+            if not batch_enabled:
+                job.JobPreJobScript = DL_COMMAND_RUNNERS["job_pre_script"]
+            else:
+                job.JobPreTaskScript = DL_COMMAND_RUNNERS["job_task_pre_script"]
+            if database_type == DatabaseType.RedisDatabase:
+                job_redis_keys = job.GetJobEnvironmentKeyValue(DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS).split(",")
+                job_redis_keys = list(set(job_redis_keys + combined_pre_script_db_identifiers))
+                job.SetJobEnvironmentKeyValue(
+                    DL_GlobalEnvironmentVariables.JOB_REDIS_KEYS, ",".join(job_redis_keys)
+                )
 
     # Submit
     job: DLJobs.Job
     job_id_to_job = {}
     for job in jobs:
         # Dependencies
-        node_name = job.JobName
+        node_name = job.sessionData["node_name"]
         node = graph[node_name]
         job_dependency_job_ids = []
         for upstream_node_name in [n.name for n in node.parents]:
-            job_dependency_job_ids.append(node_to_job[upstream_node_name].JobId)
+            upstream_job = node_name_to_job[upstream_node_name]
+            # Check for pre-script "job collapsing"
+            if upstream_job == job:
+                for upstream_node in node.upstream_nodes:
+                    upstream_job = node_name_to_job[upstream_node.name]
+                    if upstream_job != job:
+                        job_dependency_job_ids.append(upstream_job.JobId)
+                        break
+            else:
+                job_dependency_job_ids.append(upstream_job.JobId)
         job.SetJobDependencyIDs(job_dependency_job_ids)
         if job_dependency_job_ids:
             # Dependent jobs are always set to active,

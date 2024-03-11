@@ -34,3 +34,4 @@ redis-cli shutdown
 # ToDos
 - Add deadline scripts support
 - Add deadline custom dependency support/task grouping for node interpreters/task dependency instead of job dependency
+- Refactor pre/post script to run after job generation and before submit
