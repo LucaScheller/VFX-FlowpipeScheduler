@@ -671,27 +671,28 @@ def dl_send_graph_to_farm(
     for job in jobs:
         # Dependencies
         node = job.sessionData["all_nodes"][0]
-        job_dependency_job_ids = []
-        # if len(node.parents) > 1:
-        # if node.parents:
+        dependency_jobs = []
         for upstream_node in node.parents:
             upstream_job = node_name_to_job[upstream_node.name]
-            job_dependency_job_ids.append(upstream_job.JobId)
-        """
-        elif len(node.parents) == 1:
-            # Check for collapsed dependencies
-            for upstream_node in node.upstream_nodes:
-                upstream_job = node_name_to_job[upstream_node.name]
-                if upstream_job != job:
-                    job_dependency_job_ids.append(upstream_job.JobId)
-                    break
-        """
-        print("_____", job_dependency_job_ids)
-        if job_dependency_job_ids:
-            job.SetJobDependencyIDs(job_dependency_job_ids)
+            dependency_jobs.append(upstream_job)
+        if dependency_jobs:
+            job.SetJobDependencyIDs([j.JobId for j in dependency_jobs])
             # Dependent jobs are always set to active,
             # since they will be pending anyway.
             job.JobStatus = DLJobs.JobStatus.Active
+        # Frame dependencies
+        frame_dependencies_capable = True
+        if job.JobPreJobScript:
+            frame_dependencies_capable = False
+        if frame_dependencies_capable:
+            for dep_job in dependency_jobs:
+                if len(dep_job.JobFramesList) != len(job.JobFramesList):
+                    frame_dependencies_capable = False
+                if dep_job.JobPostJobScript:
+                    frame_dependencies_capable = False
+        if frame_dependencies_capable:
+            job.JobIsFrameDependent = True
+        # Submission data
         job_data, plugin_data, aux_file_paths = (
             job.serializeSubmissionCommandlineDictionaries()
         )

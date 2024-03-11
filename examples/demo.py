@@ -248,7 +248,7 @@ def api_fl_dl_submit(connection):
         batch_size=5,
         metadata={
             DL_NodeInputMetadata.batch_frame_offset: 1001,
-            # DL_NodeInputMetadata.interpreter: "python",
+            DL_NodeInputMetadata.interpreter: "houdini",
             DL_NodeInputMetadata.job_script_type: DL_JobScriptType.post,
             DL_NodeInputMetadata.job_overrides: job_overrides
         },
