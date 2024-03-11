@@ -112,8 +112,10 @@ def dl_flowpipe_example_vfx_submit(connection):
     if False:
         notify_user_node_1.metadata[DL_NodeInputMetadata.job_script_type] = DL_JobScriptType.post
 
-    # DL_NodeInputMetadata.interpreter: "houdini",
-    #DL_NodeInputMetadata.job_script_type: DL_JobScriptType.post,
+    # Job Interpreter
+    # render_image_node_1.metadata[DL_NodeInputMetadata.interpreter] = "houdini"
+
+    # Submit
     print(graph)
     jobs = scheduler.dl_send_graph_to_farm(connection, graph, optimize=optimize)
 

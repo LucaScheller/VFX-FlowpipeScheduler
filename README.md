@@ -10,6 +10,8 @@ Features:
 - Automatic batching per node with automatic frame dependencies via common naming conventions on nodes:
     - Inputs: "batch_items", "batch_size": The items to batch over with the given chunk size.
     - Metadata: "batch_frame_offset": The start frame of the tasks.
+- Automatic database cleanup for:
+    - Redis
 
 Here is a full list of features that can be attached to any node:
 
