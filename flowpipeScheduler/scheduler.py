@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import sys
 import uuid
 from tempfile import gettempdir
 
@@ -11,6 +10,18 @@ from deadlineAPI.Deadline import Jobs as DLJobs
 from deadlineConfigure.etc.constants import (
     EnvironmentVariables as DL_GlobalEnvVars,
 )
+
+
+# -----------------------------------------------------------------------------
+#
+# Logging
+#
+# -----------------------------------------------------------------------------
+
+
+logging.basicConfig(level=logging.DEBUG)
+LOG = logging.getLogger(os.path.basename(__file__))
+
 
 # -----------------------------------------------------------------------------
 #
@@ -367,12 +378,13 @@ def dl_job_script_evaluate_on_farm_through_env(script_type: str, batch_range: tu
 
 
 def dl_send_graph_to_farm(
-    connection, graph: Graph, database_type=DatabaseType.RedisDatabase
+    connection, graph: Graph, optimize=True, database_type=DatabaseType.RedisDatabase
 ):
     """Convert the graph to a dict representing a typical render farm job.
     Args:
         connection (DeadlineWebService.DeadlineConnect.DeadlineCon): The deadline webservice connection.
         graph (Graph): The graph.
+        optimize (bool): Collapse parts of the graph to a single job where possible.
         database_type (DatabaseType): The database type.
     Returns:
         list[DLJobs.Jobs]: A list of job objects.
@@ -386,13 +398,13 @@ def dl_send_graph_to_farm(
     job_batch_name = "{} ({})".format(graph.name, job_batch_hash)
 
     # Convert to DL jobs
-    node_name_to_db_id = {}
-    node_name_to_job = {}
+    node_id_to_db_id = {}
+    node_id_to_job = {}
     node: INode
     for node in graph.evaluation_sequence:
         # Job
         job = DLJobs.Job()
-        node_name_to_job[node.name] = job
+        node_id_to_job[node.identifier] = job
         jobs.append(job)
         # Defaults
         job.applyChangeSet(dl_get_job_default())
@@ -442,7 +454,7 @@ def dl_send_graph_to_farm(
             node.metadata.pop(DL_NodeInputMetadata.job_overrides)
         # Store node in database (must be done as a last step, so that we have the configured data)
         db_id = database.set(node)
-        node_name_to_db_id[node.name] = db_id
+        node_id_to_db_id[node.identifier] = db_id
 
     # Graph optimization / Job pre/post (task) scripts
     """Order of operations:
@@ -528,6 +540,14 @@ def dl_send_graph_to_farm(
         if not len(children_nodes) == 1:
             return False
         child_node = list(children_nodes)[0]
+        child_node_parents = child_node.parents
+        if len(child_node_parents) != 1:
+            return False
+        # Optimize Override
+        node_graph_optimize = node.metadata.get(DL_NodeInputMetadata.graph_optimize, True)
+        child_node_graph_optimize = child_node.metadata.get(DL_NodeInputMetadata.graph_optimize, True)
+        if not node_graph_optimize or not child_node_graph_optimize:
+            return False
         # Interpreter
         node_interpreter = node.metadata.get(DL_NodeInputMetadata.interpreter, COMMAND_INTERPRETER_DEFAULT)
         node_interpreter_version = node.metadata.get(DL_NodeInputMetadata.interpreter_version, COMMAND_INTERPRETER_VERSION_DEFAULT)
@@ -563,23 +583,25 @@ def dl_send_graph_to_farm(
             }
             # Validate direct single upstream/downstream node
             if not validate_job_script(node, direction[node_job_script_type]):
+                LOG.debug("Removing '{}' job script type from node '{}' as it doesn't meet "
+                          "the necessary requirements.".format(node_job_script_type, node.name))
                 node.metadata.pop(DL_NodeInputMetadata.job_script_type, None)
     # Step 2: Collapse graph where possible from "left to right"
-    optimize = False
     if optimize:
         optimized_jobs = []
         for job in jobs:
-            node = job.sessionData["nodes"][0]
-            node_name = node.name
+            nodes = job.sessionData["nodes"]
+            node = job.sessionData["nodes"][-1]
             if not validate_job_collapse(node):
                 optimized_jobs.append(job)
                 continue
             # Move node to child job
+            child_node: INode
             child_node = list(node.children)[0]
             child_job: DLJobs.Job
-            child_job = node_name_to_job[child_node.name]
-            child_job.sessionData["nodes"].insert(0, node)
-            node_name_to_job[node_name] = child_job
+            child_job = node_id_to_job[child_node.identifier]
+            child_job.sessionData["nodes"] = nodes + child_job.sessionData["nodes"]
+            node_id_to_job[node.identifier] = child_job
             # TODO Here we could decide to also merge certain job settings
         jobs = optimized_jobs
     # Step 3: Collapse graph where possible using job/task pre/post scripts
@@ -594,9 +616,10 @@ def dl_send_graph_to_farm(
             continue
         if node_job_script_type == DL_JobScriptType.pre:
             # Move node to child job
+            child_node: INode
             child_node = list(node.children)[0]
             child_job: DLJobs.Job
-            child_job = node_name_to_job[child_node.name]
+            child_job = node_id_to_job[child_node.identifier]
             # Chain nodes during job iteration
             batch_active, batch_size, batch_item_count = get_batch_values(node)
             node_key = "job_pre_script_nodes" if not batch_active else "job_task_pre_script_nodes"
@@ -605,12 +628,12 @@ def dl_send_graph_to_farm(
             combined_script_nodes = script_nodes + child_script_nodes + [node]
             child_job.sessionData[node_key] = combined_script_nodes
             for n in combined_script_nodes:
-                node_name_to_job[n.name] = child_job
+                node_id_to_job[n.identifier] = child_job
         if node_job_script_type == DL_JobScriptType.post:
             # Move node to parent job
             parent_node = list(node.parents)[0]
             parent_job: DLJobs.Job
-            parent_job = node_name_to_job[parent_node.name]
+            parent_job = node_id_to_job[parent_node.identifier]
             # Chain nodes during job iteration
             batch_active, batch_size, batch_item_count = get_batch_values(node)
             node_key = "job_post_script_nodes" if not batch_active else "job_task_post_script_nodes"
@@ -619,7 +642,7 @@ def dl_send_graph_to_farm(
             combined_script_nodes = [node] + parent_script_nodes + script_nodes
             parent_job.sessionData[node_key] = combined_script_nodes
             for n in combined_script_nodes:
-                node_name_to_job[n.name] = parent_job
+                node_id_to_job[n.identifier] = parent_job
     jobs = submit_jobs
     # Step 4: Serialize to db and configure jobs to match collapse state
     for job in jobs:
@@ -635,35 +658,36 @@ def dl_send_graph_to_farm(
         job.JobName = job_name
         # Scripts
         if job_pre_script_nodes:
-            identifiers = [node_name_to_db_id[n.name] for n in job_pre_script_nodes]
+            identifiers = [node_id_to_db_id[n.identifier] for n in job_pre_script_nodes]
             job.JobPreJobScript = DL_COMMAND_RUNNERS["job_pre_script"]
             job.SetJobEnvironmentKeyValue(DL_EnvVars.job_pre_script_identifiers,
                                           ",".join(identifiers))
         if job_task_pre_script_nodes:
-            identifiers = [node_name_to_db_id[n.name] for n in job_task_pre_script_nodes]
+            identifiers = [node_id_to_db_id[n.identifier] for n in job_task_pre_script_nodes]
             job.JobPreTaskScript = DL_COMMAND_RUNNERS["job_task_pre_script"]
             job.SetJobEnvironmentKeyValue(DL_EnvVars.job_task_pre_script_identifiers,
                                           ",".join(identifiers))
-        identifiers = [node_name_to_db_id[n.name] for n in job_nodes]
+        identifiers = [node_id_to_db_id[n.identifier] for n in job_nodes]
         job.SetJobEnvironmentKeyValue(EnvVars.identifiers, ",".join(identifiers))
         if job_task_post_script_nodes:
-            identifiers = [node_name_to_db_id[n.name] for n in job_task_post_script_nodes]
+            identifiers = [node_id_to_db_id[n.identifier] for n in job_task_post_script_nodes]
             job.JobPostTaskScript = DL_COMMAND_RUNNERS["job_task_post_script"]
             job.SetJobEnvironmentKeyValue(DL_EnvVars.job_task_post_script_identifiers,
                                           ",".join(identifiers))
         if job_post_script_nodes:
-            identifiers = [node_name_to_db_id[n.name] for n in job_post_script_nodes]
+            identifiers = [node_id_to_db_id[n.identifier] for n in job_post_script_nodes]
             job.JobPostJobScript = DL_COMMAND_RUNNERS["job_post_script"]
             job.SetJobEnvironmentKeyValue(DL_EnvVars.job_post_script_identifiers,
                                           ",".join(identifiers))
         # Redis
         if database_type == DatabaseType.RedisDatabase:
             job_redis_keys = [
-                node_name_to_db_id[n.name] for n in all_nodes
+                node_id_to_db_id[n.identifier] for n in all_nodes
             ]
             job.SetJobEnvironmentKeyValue(
                 DL_GlobalEnvVars.JOB_REDIS_KEYS, ",".join(job_redis_keys)
             )
+            job.JobEventOptIns = job.JobEventOptIns + ["Redis"]
 
     # Submit
     job: DLJobs.Job
@@ -673,7 +697,7 @@ def dl_send_graph_to_farm(
         node = job.sessionData["all_nodes"][0]
         dependency_jobs = []
         for upstream_node in node.parents:
-            upstream_job = node_name_to_job[upstream_node.name]
+            upstream_job = node_id_to_job[upstream_node.identifier]
             dependency_jobs.append(upstream_job)
         if dependency_jobs:
             job.SetJobDependencyIDs([j.JobId for j in dependency_jobs])
@@ -687,6 +711,8 @@ def dl_send_graph_to_farm(
         if frame_dependencies_capable:
             for dep_job in dependency_jobs:
                 if len(dep_job.JobFramesList) != len(job.JobFramesList):
+                    frame_dependencies_capable = False
+                if dep_job.JobFramesPerTask != job.JobFramesPerTask:
                     frame_dependencies_capable = False
                 if dep_job.JobPostJobScript:
                     frame_dependencies_capable = False
@@ -720,7 +746,7 @@ def dl_send_graph_to_farm(
             connection.Jobs.SaveJob(job.serializeWebAPI())
         """
         # Instead we disable the frame dependency if there is a mis-match
-        if job.JobIsFrameDependent and False:
+        if job.JobIsFrameDependent:
             job_frame_first = sorted(job.JobFramesList)[0]
             job_dependencies_changed = False
             for job_dependency in job.JobDependencies:
@@ -733,5 +759,5 @@ def dl_send_graph_to_farm(
             if job_dependencies_changed:
                 state = connection.Jobs.SaveJob(job.serializeWebAPI())
                 if state != "Success":
-                    raise Exception("Failed to submit job.")
+                    raise Exception("Failed to edit job.")
     return jobs

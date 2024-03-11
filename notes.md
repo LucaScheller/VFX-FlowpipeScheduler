@@ -32,9 +32,6 @@ redis-cli shutdown
 
 
 # ToDos
-- Add graph optimization:
+- Add partial redis json file editing via the json editing capabilities of redis
+- Add further graph optimization:
     - Add deadline support for putting all nodes into a single job (if the interpreter allows it)
-    - Collapse single input/output nodes
-
-- Add support for job pre/post scripts on per task dependent jobs (so mixing job/task pre/post scripts)
-- Refactor pre/post script to run after job generation and before submit

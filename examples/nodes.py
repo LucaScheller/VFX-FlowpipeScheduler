@@ -1,25 +1,63 @@
+import os
 from flowpipe import Graph, Node
 
+# -----------------------------------------------------------------------------
+#
+# VFX Pipeline
+#
+# -----------------------------------------------------------------------------
 
-@Node(outputs=["value"], metadata={"interpreter": "python"})
-def RenderSceneDescripition(value):
-    """Render the given frames from the given scene.."""
-    print("HEEEEEEEEEE Running Render Scene Descr")
-    return {"value": 5}
 
-@Node(outputs=["value"], metadata={"interpreter": "python"})
-def RenderImage(value, batch_items, batch_size):
-    """Render the given frames from the given scene.."""
-    print("HEEEEEEEEEE Running Render Image", batch_items)
-    return {"value": value + 10, "value.0": 10, "value.1": 10}
+@Node(outputs=["sceneDescription_file_path"], metadata={"interpreter": "python"})
+def GenerateSceneDescriptionNode(scene_file_path):
+
+    print("Running generate scene description.")
+    return {"sceneDescription_file_path": "/some/file/path/render.usd"}
+
+
+@Node(outputs=["image_file_path"], metadata={"interpreter": "python"})
+def RenderImageNode(sceneDescription_file_path, renderpass, batch_items, batch_size):
+    print("Running render image on {} items".format(len(batch_items)))
+    image_file_name = renderpass + ".{:04d}.exr"
+    image_file_path = os.path.join("/some/file/path", image_file_name)
+    for item in batch_items:
+        print("--> Running render image on batch item",
+              sceneDescription_file_path, renderpass, image_file_path.format(item))
+    return {"image_file_path": image_file_path}
+
+
+@Node(outputs=["image_file_path"], metadata={"interpreter": "python"})
+def ValidateImageNode(image_file_path, batch_items, batch_size):
+    print("Running validate image on {} items".format(len(batch_items)))
+    for item in batch_items:
+        print("--> Running validate image on batch item", image_file_path.format(item))
+    return {"image_file_path": image_file_path}
+
+@Node(outputs=["image_file_path"], metadata={"interpreter": "python"})
+def NotifyUserNode(image_file_path, user_names):
+    print("Notifying users", user_names , "about", image_file_path)
+    return {"image_file_path": image_file_path}
+
+
+@Node(outputs=["image_file_path"], metadata={"interpreter": "python"})
+def MultipartConvertImageNode(image_file_path, batch_items, batch_size):
+    print("Running multipart convert image on {} items".format(len(batch_items)))
+    for item in batch_items:
+        print("--> Running multipart convert image on batch item", image_file_path.format(item))
+    return {"image_file_path": image_file_path}
+
+
+@Node(outputs=["image_file_path", "denoise_image_file_path"], metadata={"interpreter": "python"})
+def DenoiseImageNode(image_file_path, batch_items, batch_size):
+    print("Running denoise image on {} items".format(len(batch_items)))
+    for item in batch_items:
+        print("--> Running denoise image on batch item", image_file_path.format(item))
+    return {"image_file_path": image_file_path,
+            "denoise_image_file_path": "/some/file/path/denoise_image.{:04d}.exr"}
 
 
 @Node(outputs=["status"], metadata={"interpreter": "python"})
-def UpdateDatabase(id_, value):
-    """Update the database entries of the given asset with the given data."""
-    print("HEEEEEEEEEEEEEEE", value)
-    return {"status": "nothing"}
-    value = sum(value.values())
-    
-
-    return {"status": value}
+def UpdateDatabaseNode(image_file_paths):
+    print("Running update database on images", image_file_paths)
+    status = "Successful"
+    return {"status": status}
