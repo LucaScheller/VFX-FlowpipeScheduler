@@ -5,7 +5,7 @@ then
     export REPO_SOURCED=1
     export REPO_ROOT=$PROJECT/VFX-FlowpipeScheduler
     # Source Python
-    source $REPO_ROOT/ext/python/bin/activate
+    source $REPO_ROOT/external/python/bin/activate
     export PYTHONDONTWRITEBYTECODE=1 # Disable __pycache__ byte code generation
     # Add external Python packages
     export DEADLINE_INSTALL_ROOT=/opt/Thinkbox

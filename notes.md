@@ -1,19 +1,20 @@
 # Repo Setup
 > export REPO_ROOT=$PROJECT/VFX-FlowpipeScheduler
 ## Sub-Modules
-> git submodule add https://github.com/LucaScheller/flowpipe.git ext/flowpipe
-> git submodule add https://github.com/LucaScheller/NodeGraphQt.git ext/NodeGraphQt
+> git submodule add https://github.com/LucaScheller/flowpipe.git external/flowpipe
+> git submodule add https://github.com/LucaScheller/NodeGraphQt.git external/NodeGraphQt
 ## Python
-> python3.12 -m venv $PROJECT/VFX-FlowpipeScheduler/ext/python
+> python3.12 -m venv $PROJECT/VFX-FlowpipeScheduler/external/python
 Manually edit shell line prefix to "VFX-DeadlineFlowpipe-Python" in:
-$PROJECT/VFX-FlowpipeScheduler/ext/python/bin/activate
+$PROJECT/VFX-FlowpipeScheduler/external/python/bin/activate
 ### Dependency Links
-> ln -s -r ext/flowpipe/flowpipe ext/python/lib/python3.12/site-packages/flowpipe
-> ln -s -r ext/NodeGraphQt/NodeGraphQt ext/python/lib/python3.12/site-packages/NodeGraphQt
+> ln -s -r external/flowpipe/flowpipe external/python/lib/python3.12/site-packages/flowpipe
+> ln -s -r external/NodeGraphQt/NodeGraphQt external/python/lib/python3.12/site-packages/NodeGraphQt
 ### Pip Installs
-> source $REPO_ROOT/ext/python/bin/activate
+> source $REPO_ROOT/external/python/bin/activate
 > pip install ascii_canvas
 > pip install /opt/Thinkbox/DeadlineRepository10/api/scripting/deadline-stubs-10.3.1.4.tar.gz
+> pip install PySide2
 
 # Repo Source
 ## Dev Env

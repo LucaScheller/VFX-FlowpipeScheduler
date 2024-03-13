@@ -1,4 +1,5 @@
 ascii_canvas
 flowpipe
+PySide2
 async_timeout
 redis
