@@ -1,6 +1,6 @@
 [submodule "ext/flowpipe"]
-	path = ext/flowpipe
+	path = external/flowpipe
 	url = https://github.com/LucaScheller/flowpipe.git
 [submodule "ext/NodeGraphQt"]
-	path = ext/NodeGraphQt
+	path = external/NodeGraphQt
 	url = https://github.com/LucaScheller/NodeGraphQt.git
