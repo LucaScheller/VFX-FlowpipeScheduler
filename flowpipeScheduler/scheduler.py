@@ -5,12 +5,11 @@ import uuid
 from tempfile import gettempdir
 
 import redis
-from flowpipe import Graph, INode
 from deadlineAPI.Deadline import Jobs as DLJobs
 from deadlineConfigure.etc.constants import (
     EnvironmentVariables as DL_GlobalEnvVars,
 )
-
+from flowpipe import Graph, INode
 
 # -----------------------------------------------------------------------------
 #
@@ -40,13 +39,17 @@ class NodeInputNames:
     batch_size = "batch_size"
 
 
-class NodeInputMetadata:
+class NodeMetadata:
     batch_frame_offset = (
         "batch_frame_offset"  # Add a 'cosmetic only' frame offset for UIs.
     )
     interpreter = "interpreter"
     interpreter_version = "interpreter_version"
     graph_optimize = "graph_optimize"
+
+
+class GraphMetadata:
+    subgraph_boundary_optimize = "subgraph_boundary_optimize"
 
 
 # -----------------------------------------------------------------------------
@@ -272,7 +275,7 @@ def evaluate_on_farm_kernel(
     batch_enable = False
     all_batch_items = []
     batch_items_plug = node.inputs.get(NodeInputNames.batch_items, None)
-    batch_frame_offset = node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
+    batch_frame_offset = node.metadata.get(DL_NodeMetadata.batch_frame_offset, 0)
     if batch_range is not None and batch_items_plug is not None:
         if batch_items_plug.value:
             batch_enable = True
@@ -329,9 +332,13 @@ class DL_EnvVars:
     job_task_post_script_identifiers = "DL_JOB_TASK_POST_SCRIPT_FP_IDENTIFIERS"
 
 
-class DL_NodeInputMetadata(NodeInputMetadata):
+class DL_NodeMetadata(NodeMetadata):
     job_overrides = "job_overrides"
     job_script_type = "job_script_type"
+
+
+class DL_GraphMetadata(GraphMetadata):
+    pass
 
 
 class DL_JobScriptType:
@@ -418,8 +425,12 @@ def dl_send_graph_to_farm(
         job.SetJobEnvironmentKeyValue(EnvVars.database_type, database_type)
         # Plugin
         job.JobPlugin = "Command"
-        node_interpreter = node.metadata.get(DL_NodeInputMetadata.interpreter, COMMAND_INTERPRETER_DEFAULT)
-        node_interpreter_version = node.metadata.get(DL_NodeInputMetadata.interpreter_version, COMMAND_INTERPRETER_VERSION_DEFAULT)
+        node_interpreter = node.metadata.get(
+            DL_NodeMetadata.interpreter, COMMAND_INTERPRETER_DEFAULT
+        )
+        node_interpreter_version = node.metadata.get(
+            DL_NodeMetadata.interpreter_version, COMMAND_INTERPRETER_VERSION_DEFAULT
+        )
         command_executable = COMMAND_INTERPRETER[node_interpreter][node_interpreter_version]
         command_args = [DL_COMMAND_RUNNERS["runner"], "<FRAME_START>", "<FRAME_END>"]
         command = "{exe} {args}".format(exe=command_executable,
@@ -439,17 +450,19 @@ def dl_send_graph_to_farm(
             if batch_size_input and batch_size_input.value:
                 batch_size = batch_size_input.value
             # TODO Add a pre job scripts that modify these dynamically.
-            batch_frame_offset = node.metadata.get(DL_NodeInputMetadata.batch_frame_offset, 0)
+            batch_frame_offset = node.metadata.get(
+                DL_NodeMetadata.batch_frame_offset, 0
+            )
             batch_frame_start = 0 + batch_frame_offset
             batch_frame_end = batch_item_count + batch_frame_offset
             job.JobFrames = "{}-{}".format(batch_frame_start, batch_frame_end)
             job.JobFramesPerTask = batch_size
         # Job Overrides
-        job_overrides = node.metadata.get(DL_NodeInputMetadata.job_overrides, None)
+        job_overrides = node.metadata.get(DL_NodeMetadata.job_overrides, None)
         if job_overrides is not None:
             job.applyChangeSet(job_overrides)
             # Force clear this submit only data
-            node.metadata.pop(DL_NodeInputMetadata.job_overrides)
+            node.metadata.pop(DL_NodeMetadata.job_overrides)
         # Store node in database (must be done as a last step, so that we have the configured data)
         db_id = database.set(node)
         node_id_to_db_id[node.identifier] = db_id
@@ -494,13 +507,17 @@ def dl_send_graph_to_farm(
             return False
         compare_node = list(compare_nodes)[0]
         # Interpreter
-        node_interpreter = node.metadata.get(DL_NodeInputMetadata.interpreter, "python")
-        node_interpreter_version = node.metadata.get(DL_NodeInputMetadata.interpreter_version, "default")
+        node_interpreter = node.metadata.get(DL_NodeMetadata.interpreter, "python")
+        node_interpreter_version = node.metadata.get(
+            DL_NodeMetadata.interpreter_version, "default"
+        )
         if node_interpreter != "python" or node_interpreter_version != "default":
             return False
         # Script Type
-        node_job_script_type = node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
-        compare_node_job_script_type = compare_node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
+        node_job_script_type = node.metadata.get(DL_NodeMetadata.job_script_type, None)
+        compare_node_job_script_type = compare_node.metadata.get(
+            DL_NodeMetadata.job_script_type, None
+        )
         if compare_node_job_script_type is not None:
             if compare_node_job_script_type != node_job_script_type:
                 return False
@@ -525,7 +542,7 @@ def dl_send_graph_to_farm(
         return True
         
     def validate_job_collapse(node):
-        """Check if the node is script attachable.
+        """Check if the node is collapse-able.
         Args:
             node (Node): The node.
         Returns:
@@ -542,20 +559,48 @@ def dl_send_graph_to_farm(
         if len(child_node_parents) != 1:
             return False
         # Optimize Override
-        node_graph_optimize = node.metadata.get(DL_NodeInputMetadata.graph_optimize, True)
-        child_node_graph_optimize = child_node.metadata.get(DL_NodeInputMetadata.graph_optimize, True)
+        node_graph_optimize = node.metadata.get(DL_NodeMetadata.graph_optimize, True)
+        child_node_graph_optimize = child_node.metadata.get(
+            DL_NodeMetadata.graph_optimize, True
+        )
         if not node_graph_optimize or not child_node_graph_optimize:
             return False
+        # Optimize Subgraph Boundary Override
+        if node.graph != child_node.graph:
+            # To make this also work on native flowpipe distributions,
+            # we use getattr instead of reading the metadata attribute directly.
+            node_subgraph_boundary_optimize = getattr(node.graph, "metadata", {}).get(
+                DL_GraphMetadata.subgraph_boundary_optimize, True
+            )
+
+            child_node_subgraph_boundary_optimize = getattr(
+                child_node.graph, "metadata", {}
+            ).get(DL_GraphMetadata.subgraph_boundary_optimize, True)
+            if (
+                not node_subgraph_boundary_optimize
+                or not child_node_subgraph_boundary_optimize
+            ):
+                return False
         # Interpreter
-        node_interpreter = node.metadata.get(DL_NodeInputMetadata.interpreter, COMMAND_INTERPRETER_DEFAULT)
-        node_interpreter_version = node.metadata.get(DL_NodeInputMetadata.interpreter_version, COMMAND_INTERPRETER_VERSION_DEFAULT)
-        child_node_interpreter = child_node.metadata.get(DL_NodeInputMetadata.interpreter, COMMAND_INTERPRETER_DEFAULT)
-        child_node_interpreter_version = child_node.metadata.get(DL_NodeInputMetadata.interpreter_version, COMMAND_INTERPRETER_VERSION_DEFAULT)
+        node_interpreter = node.metadata.get(
+            DL_NodeMetadata.interpreter, COMMAND_INTERPRETER_DEFAULT
+        )
+        node_interpreter_version = node.metadata.get(
+            DL_NodeMetadata.interpreter_version, COMMAND_INTERPRETER_VERSION_DEFAULT
+        )
+        child_node_interpreter = child_node.metadata.get(
+            DL_NodeMetadata.interpreter, COMMAND_INTERPRETER_DEFAULT
+        )
+        child_node_interpreter_version = child_node.metadata.get(
+            DL_NodeMetadata.interpreter_version, COMMAND_INTERPRETER_VERSION_DEFAULT
+        )
         if node_interpreter != child_node_interpreter or node_interpreter_version != child_node_interpreter_version:
             return False
         # Script Type
-        node_job_script_type = node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
-        child_node_job_script_type = child_node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
+        node_job_script_type = node.metadata.get(DL_NodeMetadata.job_script_type, None)
+        child_node_job_script_type = child_node.metadata.get(
+            DL_NodeMetadata.job_script_type, None
+        )
         if node_job_script_type is not None or child_node_job_script_type is not None:
             return False
         # Batch range
@@ -573,7 +618,7 @@ def dl_send_graph_to_farm(
     for job in jobs:
         node = job.sessionData["nodes"][0]
         # Validate direct single parent node
-        node_job_script_type =  node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
+        node_job_script_type = node.metadata.get(DL_NodeMetadata.job_script_type, None)
         if node_job_script_type is not None:
             direction = {
                 DL_JobScriptType.pre: "children",
@@ -583,7 +628,7 @@ def dl_send_graph_to_farm(
             if not validate_job_script(node, direction[node_job_script_type]):
                 LOG.debug("Removing '{}' job script type from node '{}' as it doesn't meet "
                           "the necessary requirements.".format(node_job_script_type, node.name))
-                node.metadata.pop(DL_NodeInputMetadata.job_script_type, None)
+                node.metadata.pop(DL_NodeMetadata.job_script_type, None)
     # Step 2: Collapse graph where possible from "left to right"
     if optimize:
         optimized_jobs = []
@@ -608,7 +653,7 @@ def dl_send_graph_to_farm(
         # Through our step 1 and 2 validation,
         # script type jobs only have 1 node.
         node = job.sessionData["nodes"][0]
-        node_job_script_type = node.metadata.get(DL_NodeInputMetadata.job_script_type, None)
+        node_job_script_type = node.metadata.get(DL_NodeMetadata.job_script_type, None)
         if node_job_script_type is None:
             submit_jobs.append(job)
             continue

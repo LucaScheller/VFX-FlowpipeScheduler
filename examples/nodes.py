@@ -1,6 +1,6 @@
 import os
 
-from flowpipe import Graph, Node
+from flowpipe import Node
 
 # -----------------------------------------------------------------------------
 #
@@ -63,6 +63,7 @@ def UpdateDatabaseNode(image_file_paths):
     print("Running update database on images", image_file_paths)
     status = "Successful"
     return {"status": status}
+
 
 @Node(outputs=["stats"], metadata={"interpreter": "python"})
 def CollectStatisticsNode(dummy_input):

@@ -1,15 +1,20 @@
 import DeadlineWebService.DeadlineConnect as Connect
 from deadlineAPI.Deadline.Jobs import Job
-
 from flowpipe import Graph
-from flowpipeScheduler import scheduler
-from flowpipeScheduler.scheduler import DL_JobScriptType, DL_NodeInputMetadata
 from nodes import *
+
+from flowpipeScheduler import scheduler
+from flowpipeScheduler.scheduler import (
+    DL_GraphMetadata,
+    DL_JobScriptType,
+    DL_NodeMetadata,
+)
 
 
 def dl_flowpipe_example_vfx_submit(connection):
     # Create graph
     graph = Graph(name="Rendering")
+    graph.metadata[DL_GraphMetadata.subgraph_boundary_optimize] = False
     # Create nodes
     scene_descr_node = GenerateSceneDescriptionNode(graph=graph,
                                                     name="Generate Scene Description")
@@ -65,19 +70,21 @@ def dl_flowpipe_example_vfx_submit(connection):
     # Job configuration
     job_scene_descr_overrides = Job()
     job_scene_descr_overrides.JobPriority = 100
-    scene_descr_node.metadata[DL_NodeInputMetadata.job_overrides] = job_scene_descr_overrides
+    scene_descr_node.metadata[DL_NodeMetadata.job_overrides] = job_scene_descr_overrides
 
     job_batch_overrides = Job()
     job_batch_overrides.JobPriority = 50
     job_batch_items = list(range(1001, 1020))
     job_batch_size = 5
 
-    render_image_node_1.metadata[DL_NodeInputMetadata.job_overrides] = job_batch_overrides
-    render_image_node_2.metadata[DL_NodeInputMetadata.job_overrides] = job_batch_overrides
-    validate_image_node_1.metadata[DL_NodeInputMetadata.job_overrides] = job_batch_overrides
-    validate_image_node_2.metadata[DL_NodeInputMetadata.job_overrides] = job_batch_overrides
-    multipart_convert_node_1.metadata[DL_NodeInputMetadata.job_overrides] = job_batch_overrides
-    denoise_image_node_1.metadata[DL_NodeInputMetadata.job_overrides] = job_batch_overrides
+    render_image_node_1.metadata[DL_NodeMetadata.job_overrides] = job_batch_overrides
+    render_image_node_2.metadata[DL_NodeMetadata.job_overrides] = job_batch_overrides
+    validate_image_node_1.metadata[DL_NodeMetadata.job_overrides] = job_batch_overrides
+    validate_image_node_2.metadata[DL_NodeMetadata.job_overrides] = job_batch_overrides
+    multipart_convert_node_1.metadata[DL_NodeMetadata.job_overrides] = (
+        job_batch_overrides
+    )
+    denoise_image_node_1.metadata[DL_NodeMetadata.job_overrides] = job_batch_overrides
 
     render_image_node_1.inputs["batch_items"].value = job_batch_items
     render_image_node_2.inputs["batch_items"].value = job_batch_items
@@ -92,22 +99,26 @@ def dl_flowpipe_example_vfx_submit(connection):
     multipart_convert_node_1.inputs["batch_size"].value = job_batch_size
     denoise_image_node_1.inputs["batch_size"].value = job_batch_size
 
-    render_image_node_1.metadata[DL_NodeInputMetadata.batch_frame_offset] = 1001
-    render_image_node_2.metadata[DL_NodeInputMetadata.batch_frame_offset] = 1001
-    validate_image_node_1.metadata[DL_NodeInputMetadata.batch_frame_offset] = 1001
-    validate_image_node_2.metadata[DL_NodeInputMetadata.batch_frame_offset] = 1001
-    multipart_convert_node_1.metadata[DL_NodeInputMetadata.batch_frame_offset] = 1001
-    denoise_image_node_1.metadata[DL_NodeInputMetadata.batch_frame_offset] = 1001
+    render_image_node_1.metadata[DL_NodeMetadata.batch_frame_offset] = 1001
+    render_image_node_2.metadata[DL_NodeMetadata.batch_frame_offset] = 1001
+    validate_image_node_1.metadata[DL_NodeMetadata.batch_frame_offset] = 1001
+    validate_image_node_2.metadata[DL_NodeMetadata.batch_frame_offset] = 1001
+    multipart_convert_node_1.metadata[DL_NodeMetadata.batch_frame_offset] = 1001
+    denoise_image_node_1.metadata[DL_NodeMetadata.batch_frame_offset] = 1001
 
     # Optimize Example
     optimize = True
     if False:
-        validate_image_node_1.metadata[DL_NodeInputMetadata.graph_optimize] = False
+        validate_image_node_1.metadata[DL_NodeMetadata.graph_optimize] = False
 
     # Job Script Example A
     if True:
-        validate_image_node_1.metadata[DL_NodeInputMetadata.job_script_type] = DL_JobScriptType.post
-        validate_image_node_2.metadata[DL_NodeInputMetadata.job_script_type] = DL_JobScriptType.post
+        validate_image_node_1.metadata[DL_NodeMetadata.job_script_type] = (
+            DL_JobScriptType.post
+        )
+        validate_image_node_2.metadata[DL_NodeMetadata.job_script_type] = (
+            DL_JobScriptType.post
+        )
 
     # Job Interpreter
     # render_image_node_1.metadata[DL_NodeInputMetadata.interpreter] = "houdini"
@@ -116,15 +127,26 @@ def dl_flowpipe_example_vfx_submit(connection):
     if True:
         # optimize = False
         nested_stats_graph = Graph(name="Nested Graph Statistics")
-        nested_stats_process_node = ProcessStatisticsNode(
-            graph=nested_stats_graph, name="Process Stats"
+        nested_stats_process_a_node = ProcessStatisticsNode(
+            graph=nested_stats_graph, name="Process Stats A"
         )
-        nested_stats_process_node.inputs["stats"].promote_to_graph(name="Nested Input")
-        nested_stats_process_node.outputs["stats"].promote_to_graph(
+        nested_stats_process_b_node = ProcessStatisticsNode(
+            graph=nested_stats_graph, name="Process Stats B"
+        )
+        nested_stats_process_a_node.inputs["stats"].promote_to_graph(
+            name="Nested Input"
+        )
+        (
+            nested_stats_process_a_node.outputs["stats"]
+            >> nested_stats_process_b_node.inputs["stats"]
+        )
+        nested_stats_process_b_node.outputs["stats"].promote_to_graph(
             name="Nested Output"
         )
 
         stats_graph = Graph(name="Statistics")
+        # Disable optimize on subgraphs
+        # stats_graph.metadata[DL_GraphMetadata.subgraph_boundary_optimize] = False
         stats_collect_node = CollectStatisticsNode(
             graph=stats_graph, name="Collect Stats"
         )
