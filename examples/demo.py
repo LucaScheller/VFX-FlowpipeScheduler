@@ -109,11 +109,21 @@ def dl_flowpipe_example_vfx_submit(connection):
         validate_image_node_1.metadata[DL_NodeInputMetadata.job_script_type] = DL_JobScriptType.post
         validate_image_node_2.metadata[DL_NodeInputMetadata.job_script_type] = DL_JobScriptType.post
 
-    if False:
-        notify_user_node_1.metadata[DL_NodeInputMetadata.job_script_type] = DL_JobScriptType.post
-
     # Job Interpreter
     # render_image_node_1.metadata[DL_NodeInputMetadata.interpreter] = "houdini"
+
+    # Subgraph
+    if True:
+        # optimize = False
+        stats_graph = Graph(name="Statistics")
+        stats_collect_node = CollectStatisticsNode(
+            graph=stats_graph, name="Collect Stats"
+        )
+        stats_send_node = SendStatisticsNode(graph=stats_graph, name="Send Stats")
+        stats_collect_node.outputs["stats"] >> stats_send_node.inputs["stats"]
+        stats_collect_node.inputs["dummy_input"].promote_to_graph(name="Input")
+        stats_send_node.outputs["dummy_output"].promote_to_graph(name="Output")
+        update_db_node.outputs["status"] >> stats_graph.inputs["Input"]
 
     # Submit
     print(graph)

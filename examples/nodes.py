@@ -1,4 +1,5 @@
 import os
+
 from flowpipe import Graph, Node
 
 # -----------------------------------------------------------------------------
@@ -33,6 +34,7 @@ def ValidateImageNode(image_file_path, batch_items, batch_size):
         print("--> Running validate image on batch item", image_file_path.format(item))
     return {"image_file_path": image_file_path}
 
+
 @Node(outputs=["image_file_path"], metadata={"interpreter": "python"})
 def NotifyUserNode(image_file_path, user_names):
     print("Notifying users", user_names , "about", image_file_path)
@@ -61,3 +63,15 @@ def UpdateDatabaseNode(image_file_paths):
     print("Running update database on images", image_file_paths)
     status = "Successful"
     return {"status": status}
+
+@Node(outputs=["stats"], metadata={"interpreter": "python"})
+def CollectStatisticsNode(dummy_input):
+    print("Running collect statistics")
+    stats = "Successful"
+    return {"stats": stats}
+
+
+@Node(outputs=["dummy_output"], metadata={"interpreter": "python"})
+def SendStatisticsNode(stats):
+    print("Running send statistics", stats)
+    return {"dummy_output": None}

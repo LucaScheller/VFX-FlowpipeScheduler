@@ -31,7 +31,6 @@ $DEADLINE_INSTALL_ROOT/DeadlineClient10/bin/deadlineworker -name "background"
 deadline-stop
 redis-cli shutdown
 
-
 # ToDos
 - Add partial redis json file editing via the json editing capabilities of redis
 - Add further graph optimization:

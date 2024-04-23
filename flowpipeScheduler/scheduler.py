@@ -409,7 +409,6 @@ def dl_send_graph_to_farm(
         job.applyChangeSet(dl_get_job_default())
         # General
         job.JobBatchName = job_batch_name
-        job.JobName = node.name
         job.sessionData["job_pre_script_nodes"] = []
         job.sessionData["job_task_pre_script_nodes"] = []
         job.sessionData["nodes"] = [node]
@@ -653,7 +652,13 @@ def dl_send_graph_to_farm(
         # Label
         all_nodes = job_pre_script_nodes + job_task_pre_script_nodes + job_nodes + job_task_post_script_nodes + job_post_script_nodes
         job.sessionData["all_nodes"] = all_nodes
-        job_name = ",".join([n.name for n in all_nodes])
+        job_name = []
+        for n in all_nodes:
+            node_name = n.name
+            if n.graph != graph:
+                node_name = "{} ({})".format(n.name, n.graph.name)
+            job_name.append(node_name)
+        job_name = ", ".join(job_name)
         job.JobName = job_name
         # Scripts
         if job_pre_script_nodes:
