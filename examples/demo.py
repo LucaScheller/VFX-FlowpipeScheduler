@@ -115,12 +115,23 @@ def dl_flowpipe_example_vfx_submit(connection):
     # Subgraph
     if True:
         # optimize = False
+        nested_stats_graph = Graph(name="Nested Graph Statistics")
+        nested_stats_process_node = ProcessStatisticsNode(
+            graph=nested_stats_graph, name="Process Stats"
+        )
+        nested_stats_process_node.inputs["stats"].promote_to_graph(name="Nested Input")
+        nested_stats_process_node.outputs["stats"].promote_to_graph(
+            name="Nested Output"
+        )
+
         stats_graph = Graph(name="Statistics")
         stats_collect_node = CollectStatisticsNode(
             graph=stats_graph, name="Collect Stats"
         )
         stats_send_node = SendStatisticsNode(graph=stats_graph, name="Send Stats")
-        stats_collect_node.outputs["stats"] >> stats_send_node.inputs["stats"]
+        stats_collect_node.outputs["stats"] >> nested_stats_graph.inputs["Nested Input"]
+        nested_stats_graph.outputs["Nested Output"] >> stats_send_node.inputs["stats"]
+
         stats_collect_node.inputs["dummy_input"].promote_to_graph(name="Input")
         stats_send_node.outputs["dummy_output"].promote_to_graph(name="Output")
         update_db_node.outputs["status"] >> stats_graph.inputs["Input"]

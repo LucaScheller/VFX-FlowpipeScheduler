@@ -67,7 +67,12 @@ def UpdateDatabaseNode(image_file_paths):
 @Node(outputs=["stats"], metadata={"interpreter": "python"})
 def CollectStatisticsNode(dummy_input):
     print("Running collect statistics")
-    stats = "Successful"
+    return {"stats": dummy_input}
+
+
+@Node(outputs=["stats"], metadata={"interpreter": "python"})
+def ProcessStatisticsNode(stats):
+    print("Running process statistics")
     return {"stats": stats}
 
 
